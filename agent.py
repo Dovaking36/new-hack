@@ -15,6 +15,8 @@ from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from system_prompts import system_prompt_v2
 from history_utils import save_bot_message_to_history
@@ -22,11 +24,30 @@ from history_utils import save_bot_message_to_history
 # ================== НАСТРОЙКИ ==================
 CREDENTIALS = "MDE5Y2Q2OTYtMTk2ZC03YzVjLTgxZTQtOTk5NjhlNWRjYWFlOjFjZWU1YjI4LWRiYWUtNGIxMS05NGMyLTBlYmQ4NWEyMTVhYw=="
 HISTORY_DIR = "chat_history"
+session_store = {}
 
 logger = logging.getLogger(__name__)
 
 # Переменная контекста для хранения ID текущего чата
 current_chat_id_var = contextvars.ContextVar('current_chat_id', default=None)
+
+def get_session_history(session_id: str) -> ChatMessageHistory:
+    if session_id not in session_store:
+        session_store[session_id] = ChatMessageHistory()
+    return session_store[session_id]
+
+def create_agent_with_memory(bot):
+    # Создаём обычного агента (executor)
+    executor = create_agent(bot)
+    # Оборачиваем в RunnableWithMessageHistory
+    with_history = RunnableWithMessageHistory(
+        executor,
+        get_session_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+    )
+    return with_history
+
 
 # ================== ИНСТРУМЕНТЫ ==================
 
@@ -237,6 +258,18 @@ class GigaChatSingleton:
     _executor = None
     _bot = None
     _analysis_llm = None
+    _executor_with_history = None
+
+    async def get_executor(self):
+        if self._executor_with_history is None:
+            self._executor_with_history = create_agent_with_memory(self._bot)
+        return self._executor_with_history
+
+    async def ainvoke_with_history(self, chat_id: int, user_message: str):
+        executor = await self.get_executor()
+        config = {"configurable": {"session_id": str(chat_id)}}
+        result = await executor.ainvoke({"input": user_message}, config=config)
+        return result["output"]
 
     def __new__(cls):
         if cls._instance is None:
@@ -260,10 +293,7 @@ class GigaChatSingleton:
     def set_bot(self, bot):
         self._bot = bot
 
-    async def get_executor(self):
-        if self._executor is None:
-            self._executor = create_agent(self._bot)
-        return self._executor
+
 
     async def close(self):
         pass
