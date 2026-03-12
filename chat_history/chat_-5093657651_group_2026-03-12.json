@@ -49,5 +49,158 @@
       "title": "еуые"
     },
     "text": "/bot проанализируй историю чата на наличие важных сообщений"
+  },
+  {
+    "id": 779,
+    "timestamp": "2026-03-12T20:26:32+00:00",
+    "unix_time": 1773347192,
+    "user": {
+      "id": 7408513249,
+      "username": "cuteunicorn18",
+      "first_name": "Даня",
+      "last_name": "Мартин"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "еуые"
+    },
+    "text": "/help"
+  },
+  {
+    "id": 824,
+    "timestamp": "2026-03-12T21:59:58+00:00",
+    "unix_time": 1773352798,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/help"
+  },
+  {
+    "id": 826,
+    "timestamp": "2026-03-12T22:00:25+00:00",
+    "unix_time": 1773352825,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot дай краткую выжимку по этому чату"
+  },
+  {
+    "id": 831,
+    "timestamp": "2026-03-12T22:03:37+00:00",
+    "unix_time": 1773353017,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/help"
+  },
+  {
+    "id": 833,
+    "timestamp": "2026-03-12T22:03:44+00:00",
+    "unix_time": 1773353024,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/get_history"
+  },
+  {
+    "id": 838,
+    "timestamp": "2026-03-12T22:06:07+00:00",
+    "unix_time": 1773353167,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot какие мероприятия сюда выкладывали"
+  },
+  {
+    "id": 840,
+    "timestamp": "2026-03-12T22:06:42+00:00",
+    "unix_time": 1773353202,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot я не понял, куда идти"
+  },
+  {
+    "id": 842,
+    "timestamp": "2026-03-12T22:10:22+00:00",
+    "unix_time": 1773353422,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/сколько сейчас времени и какая сейчас дата"
+  },
+  {
+    "id": 843,
+    "timestamp": "2026-03-12T22:10:35+00:00",
+    "unix_time": 1773353435,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot сколько сейчас времени и какая сейчас дата"
   }
 ]

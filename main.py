@@ -197,57 +197,69 @@ async def handle_photo(message: Message):
             await message.reply("❌ Не удалось обработать изображение.")
 
 # ================== ОБРАБОТЧИК ГОЛОСОВЫХ СООБЩЕНИЙ ==================
+# main.py
 @dp.message(F.voice)
 async def handle_voice(message: Message):
     asyncio.create_task(safe_save_message(message))
-
     voice = message.voice
-    file = await bot.get_file(voice.file_id)
-    file_path = file.file_path
-
-    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-        await bot.download_file(file_path, tmp.name)
-        tmp_path = tmp.name
+    tmp_path = None  # Для очистки в finally
 
     try:
+        # 1. Скачиваем файл от Telegram (как и раньше)
+        file = await bot.get_file(voice.file_id)
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            await bot.download_file(file.file_path, tmp.name)
+            tmp_path = tmp.name
+
         async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
+            # 2. Получаем асинхронный клиент GigaChat из синглтона
+            client = await gigachat_singleton.get_async_client()
+
+            # Загружаем аудио
             with open(tmp_path, "rb") as f:
-                audio_base64 = base64.b64encode(f.read()).decode('utf-8')
+                uploaded = await client.aupload_file(f, purpose="general")
+            audio_file_id = uploaded.id_
 
-            prompt = "Распознай речь в этом аудио и выведи текст."
-            # Исправлено: HumanMessage из langchain
-            human_msg = HumanMessage(
-                content=[
-                    {"type": "text", "text": prompt},
-                    {"type": "audio_url", "audio_url": {"url": f"data:audio/ogg;base64,{audio_base64}"}}
-                ]
-            )
+            # Запрос на транскрибацию
+            response = await client.achat({
+                "model": "GigaChat-Max",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Распознай речь в этом аудио.",
+                        "attachments": [audio_file_id],
+                    }
+                ],
+                "temperature": 0.0,
+            })
+            # Извлекаем текст ответа
+            transcribed_text = response.choices[0].message.content.strip()
 
-            llm = await gigachat_singleton.get_analysis_llm()
-            response = await llm.agenerate([[human_msg]])
-            text = response.generations[0][0].text.strip()
+            # 5. (Опционально) Удаляем файл из хранилища, если он больше не нужен
+            # await client.delete_file(file_id)
 
-        if not text:
-            text = "[Не удалось распознать речь]"
+        if not transcribed_text:
+            transcribed_text = "[Не удалось распознать речь]"
 
-        await message.reply(f"📝 Распознано: {text}")
+        await message.reply(f"📝 Распознано: {transcribed_text}")
 
+        # Сохраняем в историю (как и раньше)
         bot_me = await bot.me()
         await asyncio.to_thread(
             save_bot_message,
             chat_id=message.chat.id,
-            text=f"🎤 Голосовое сообщение расшифровано: {text}",
+            text=f"🎤 Голосовое сообщение расшифровано: {transcribed_text}",
             reply_to_message_id=message.message_id,
             bot_id=bot_me.id,
-            bot_username=bot_me.username
+            bot_username=bot_me.username,
         )
 
-        logger.info(f"Голосовое от {message.from_user.id} транскрибировано: {text[:50]}...")
     except Exception as e:
         logger.error(f"Ошибка транскрипции через GigaChat: {e}", exc_info=True)
         await message.reply("❌ Не удалось распознать речь.")
     finally:
-        os.unlink(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # ================== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ТЕКСТА ==================
 @dp.message()

@@ -13,6 +13,7 @@ from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from gigachat import GigaChatAsyncClient
 
 from config import GIGACHAT_CREDENTIALS
 from system_prompts import system_prompt_v2
@@ -112,44 +113,48 @@ def create_transcribe_tool(bot):
     @tool
     async def transcribe_audio(file_id: str, chat_id: Optional[int] = None) -> str:
         """
-        Транскрибирует голосовое сообщение по его file_id.
-        Параметры:
-            file_id (str): идентификатор файла в Telegram.
-            chat_id (int, optional): ID чата для сохранения результата в историю.
-        Возвращает распознанный текст.
+        Транскрибирует голосовое сообщение по его file_id, используя хранилище GigaChat.
         """
+        tmp_path = None
         try:
+            # 1. Скачиваем файл от Telegram
             file = await bot.get_file(file_id)
-            file_path = file.file_path
-
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-                await bot.download_file(file_path, tmp.name)
+                await bot.download_file(file.file_path, tmp.name)
                 tmp_path = tmp.name
 
-            with open(tmp_path, "rb") as f:
-                audio_base64 = base64.b64encode(f.read()).decode('utf-8')
-
-            prompt = "Распознай речь в этом аудио."
-            human_msg = HumanMessage(
-                content=[
-                    {"type": "text", "text": prompt},
-                    {"type": "audio_url", "audio_url": {"url": f"data:audio/ogg;base64,{audio_base64}"}}
-                ]
-            )
-
-            llm = GigaChat(
+            # 2. Получаем клиент GigaChat (лучше брать из синглтона, но можно создать и здесь)
+            #    Для простоты создадим экземпляр внутри инструмента.
+            #    Внимание: для production лучше использовать пул соединений или синглтон.
+            async with GigaChatAsyncClient(
                 credentials=GIGACHAT_CREDENTIALS,
                 verify_ssl_certs=False,
-                model="GigaChat-2-Multimodal",
-                temperature=0.0,
-                max_tokens=1024,
-                auto_upload_audios=True,
-            )
-            response = await llm.agenerate([[human_msg]])
-            text = response.generations[0][0].text.strip()
+            ) as client:
+                # 3. Загружаем аудио
+                with open(tmp_path, "rb") as f:
+                    uploaded = await client.upload_file(f, purpose="general")
+                audio_file_id = uploaded.id
 
+                # 4. Делаем запрос на транскрибацию
+                response = await client.chat(
+                    {
+                        "model": "GigaChat-Max",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "Распознай речь в этом аудио.",
+                                "attachments": [audio_file_id],
+                            }
+                        ],
+                        "temperature": 0.0,
+                    }
+                )
+                text = response.choices[0].message.content.strip()
+
+            # 5. Сохраняем результат в историю (опционально, как в вашем коде)
             if chat_id:
                 bot_me = await bot.me()
+                # Функция save_bot_message должна быть доступна
                 save_bot_message(
                     chat_id=chat_id,
                     text=f"🎤 Транскрипция аудио (file_id {file_id}): {text}",
@@ -159,14 +164,15 @@ def create_transcribe_tool(bot):
                 )
 
             return json.dumps({"success": True, "text": text}, ensure_ascii=False)
+
         except Exception as e:
-            logger.error(f"Ошибка транскрипции: {e}")
+            logger.error(f"Ошибка транскрипции в инструменте: {e}")
             return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
         finally:
-            if 'tmp_path' in locals():
+            if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
-    return transcribe_audio
 
+    return transcribe_audio
 # ================== СОЗДАНИЕ АГЕНТА ==================
 def create_agent(bot):
     tools = [
@@ -203,6 +209,24 @@ class GigaChatSingleton:
     _bot = None
     _analysis_llm = None
     _executor_with_history = None
+    _async_client: Optional[GigaChatAsyncClient] = None
+
+    async def get_async_client(self) -> GigaChatAsyncClient:
+        """Возвращает асинхронный клиент GigaChat для работы с файлами и прямыми запросами."""
+        if self._async_client is None:
+            self._async_client = GigaChatAsyncClient(
+                credentials=GIGACHAT_CREDENTIALS,
+                verify_ssl_certs=False,
+            )
+            # Явно входим в контекстный менеджер
+            await self._async_client.__aenter__()
+        return self._async_client
+
+    async def close(self):
+        """Закрытие клиента при остановке бота."""
+        if self._async_client:
+            await self._async_client.__aexit__(None, None, None)
+            self._async_client = None
 
     async def get_executor(self):
         if self._executor_with_history is None:
