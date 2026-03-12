@@ -1,31 +1,25 @@
 import json
-import asyncio
 import contextvars
 import logging
 import tempfile
 import os
 import base64
-from pathlib import Path
-from datetime import datetime
 from typing import Optional
 
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
-from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
+from config import GIGACHAT_CREDENTIALS
 from system_prompts import system_prompt_v2
-from history_utils import save_bot_message_to_history
+from history import save_bot_message
 
 # ================== НАСТРОЙКИ ==================
-CREDENTIALS = "MDE5Y2Q2OTYtMTk2ZC03YzVjLTgxZTQtOTk5NjhlNWRjYWFlOjFjZWU1YjI4LWRiYWUtNGIxMS05NGMyLTBlYmQ4NWEyMTVhYw=="
-HISTORY_DIR = "chat_history"
 session_store = {}
-
 logger = logging.getLogger(__name__)
 
 # Переменная контекста для хранения ID текущего чата
@@ -37,9 +31,7 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
     return session_store[session_id]
 
 def create_agent_with_memory(bot):
-    # Создаём обычного агента (executor)
     executor = create_agent(bot)
-    # Оборачиваем в RunnableWithMessageHistory
     with_history = RunnableWithMessageHistory(
         executor,
         get_session_history,
@@ -47,7 +39,6 @@ def create_agent_with_memory(bot):
         history_messages_key="chat_history",
     )
     return with_history
-
 
 # ================== ИНСТРУМЕНТЫ ==================
 
@@ -85,9 +76,7 @@ def create_notification_tool(bot):
             return json.dumps({"error": str(e)}, ensure_ascii=False)
     return send_notification
 
-def create_read_history_tool(history_dir: str = HISTORY_DIR):
-    history_path = Path(history_dir)
-
+def create_read_history_tool():
     @tool
     async def read_chat_history(
         chat_id: Optional[int] = None,
@@ -96,65 +85,26 @@ def create_read_history_tool(history_dir: str = HISTORY_DIR):
         search: str = "",
     ) -> str:
         """Читает историю сообщений из указанного чата. Если chat_id не указан, используется текущий чат."""
+        from history import load_chat_history, format_messages_for_display
+
         if chat_id is None:
             chat_id = current_chat_id_var.get()
             if chat_id is None:
                 return json.dumps({"error": "Не указан chat_id и не удалось определить из контекста"}, ensure_ascii=False)
 
-        limit = min(limit, 200)
-        search = search.lower()
-        pattern = f"chat_{chat_id}_*_*.json"
-        files = sorted(history_path.glob(pattern))
-        if not files:
-            return json.dumps({"message": f"История для чата {chat_id} не найдена"}, ensure_ascii=False)
-
-        all_msgs = []
-        cutoff_timestamp = None
-        if days:
-            cutoff_timestamp = datetime.now().timestamp() - days * 24 * 3600
-
-        for file in reversed(files):
-            try:
-                with open(file, 'r', encoding='utf-8') as f:
-                    msgs = json.load(f)
-                if days and cutoff_timestamp:
-                    msgs = [m for m in msgs if m.get('unix_time', 0) > cutoff_timestamp]
-                all_msgs.extend(msgs)
-                if len(all_msgs) >= limit * 2:
-                    break
-            except Exception:
-                continue
-
-        if not all_msgs:
+        messages = load_chat_history(chat_id, limit, days, search)
+        if not messages:
             return json.dumps({"message": "Нет сообщений за указанный период"}, ensure_ascii=False)
 
-        all_msgs.sort(key=lambda x: x.get('unix_time', 0))
-        recent_msgs = all_msgs[-limit:]
-
-        if search:
-            recent_msgs = [m for m in recent_msgs if search in m.get('text', '').lower()]
-            if not recent_msgs:
-                return json.dumps({"message": f"Сообщений с '{search}' не найдено"}, ensure_ascii=False)
-
+        formatted = format_messages_for_display(messages)
         result = {
             "chat_id": chat_id,
-            "total_messages_found": len(recent_msgs),
+            "total_messages_found": len(formatted),
             "period": f"последние {limit} сообщений",
-            "messages": [],
+            "messages": formatted,
         }
         if days:
             result["period"] = f"последние {days} дней"
-
-        for msg in recent_msgs:
-            user_info = msg.get('user', {})
-            username = user_info.get('username') or user_info.get('first_name', 'Unknown')
-            timestamp = msg.get('timestamp', '')
-            text = msg.get('text', '')
-            result["messages"].append({
-                "time": timestamp,
-                "user": username,
-                "text": text,
-            })
         return json.dumps(result, ensure_ascii=False, indent=2)
     return read_chat_history
 
@@ -169,20 +119,16 @@ def create_transcribe_tool(bot):
         Возвращает распознанный текст.
         """
         try:
-            # Получаем файл
             file = await bot.get_file(file_id)
             file_path = file.file_path
 
-            # Скачиваем во временный файл
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 await bot.download_file(file_path, tmp.name)
                 tmp_path = tmp.name
 
-            # Читаем и конвертируем в base64
             with open(tmp_path, "rb") as f:
                 audio_base64 = base64.b64encode(f.read()).decode('utf-8')
 
-            # Формируем запрос к GigaChat
             prompt = "Распознай речь в этом аудио."
             human_msg = HumanMessage(
                 content=[
@@ -192,7 +138,7 @@ def create_transcribe_tool(bot):
             )
 
             llm = GigaChat(
-                credentials=CREDENTIALS,
+                credentials=GIGACHAT_CREDENTIALS,
                 verify_ssl_certs=False,
                 model="GigaChat-2-Multimodal",
                 temperature=0.0,
@@ -202,10 +148,9 @@ def create_transcribe_tool(bot):
             response = await llm.agenerate([[human_msg]])
             text = response.generations[0][0].text.strip()
 
-            # Если указан chat_id, сохраняем результат в историю
             if chat_id:
                 bot_me = await bot.me()
-                await save_bot_message_to_history(
+                save_bot_message(
                     chat_id=chat_id,
                     text=f"🎤 Транскрипция аудио (file_id {file_id}): {text}",
                     reply_to_message_id=None,
@@ -220,7 +165,6 @@ def create_transcribe_tool(bot):
         finally:
             if 'tmp_path' in locals():
                 os.unlink(tmp_path)
-
     return transcribe_audio
 
 # ================== СОЗДАНИЕ АГЕНТА ==================
@@ -229,7 +173,7 @@ def create_agent(bot):
         summator,
         get_chat_id,
         create_notification_tool(bot),
-        create_read_history_tool(HISTORY_DIR),
+        create_read_history_tool(),
         create_transcribe_tool(bot),
     ]
 
@@ -241,7 +185,7 @@ def create_agent(bot):
     ])
 
     llm = GigaChat(
-        credentials=CREDENTIALS,
+        credentials=GIGACHAT_CREDENTIALS,
         verify_ssl_certs=False,
         model="GigaChat",
         temperature=0.7,
@@ -280,20 +224,17 @@ class GigaChatSingleton:
         """Возвращает экземпляр GigaChat для анализа истории (без инструментов)."""
         if self._analysis_llm is None:
             self._analysis_llm = GigaChat(
-                credentials=CREDENTIALS,
+                credentials=GIGACHAT_CREDENTIALS,
                 verify_ssl_certs=False,
-                model="GigaChat-Max",  # или "GigaChat"
+                model="GigaChat-Max",
                 temperature=0.0,
                 max_tokens=2000,
                 auto_upload_images=True
-                # Не указываем auto_upload и прочее
             )
         return self._analysis_llm
 
     def set_bot(self, bot):
         self._bot = bot
-
-
 
     async def close(self):
         pass
