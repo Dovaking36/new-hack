@@ -27,7 +27,7 @@ from history_utils import safe_json_load, safe_json_save, save_bot_message_to_hi
 CREDENTIALS = "8562857508:AAFW3w8W2u44fYte2LZCoorZ9pfOgieYKkc"
 HISTORY_DIR = "chat_history"
 TXT_EXPORT_DIR = "txt_exports"
-ANALYSIS_INTERVAL = 15
+ANALYSIS_INTERVAL = 1500
 
 Path(HISTORY_DIR).mkdir(exist_ok=True)
 Path(TXT_EXPORT_DIR).mkdir(exist_ok=True)
