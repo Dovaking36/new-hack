@@ -20,6 +20,7 @@ from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage
 
 from agent import gigachat_singleton
+from agent import current_chat_id_var
 
 # ================== НАСТРОЙКИ ==================
 TOKEN = "8562857508:AAFW3w8W2u44fYte2LZCoorZ9pfOgieYKkc"
@@ -189,10 +190,16 @@ async def cmd_bot(message: Message):
         try:
             executor = await gigachat_singleton.get_executor()
             start = time.monotonic()
-            # Передаём контекст через config metadata
-            config = {"metadata": {"chat_id": message.chat.id, "user_id": message.from_user.id}}
-            result = await executor.ainvoke({"input": user_message}, config=config)
-            answer = result["output"]
+
+
+            token = current_chat_id_var.set(message.chat.id)
+            try:
+                result = await executor.ainvoke({"input": user_message})
+                answer = result["output"]
+            finally:
+                current_chat_id_var.reset(token)
+
+
             logger.info(f"Обработка заняла {time.monotonic() - start:.2f} сек")
             await message.reply(answer)
         except Exception as e:
@@ -376,9 +383,16 @@ async def handle_all_text(message: Message):
         async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
             try:
                 executor = await gigachat_singleton.get_executor()
-                config = {"metadata": {"chat_id": message.chat.id, "user_id": message.from_user.id}}
-                result = await executor.ainvoke({"input": message.text}, config=config)
-                answer = result["output"]
+
+
+                token = current_chat_id_var.set(message.chat.id)
+                try:
+                    result = await executor.ainvoke({"input": message.text})
+                    answer = result["output"]
+                finally:
+                    current_chat_id_var.reset(token)
+
+
                 await message.reply(answer)
             except Exception as e:
                 logger.error(f"Ошибка ответа: {e}", exc_info=True)

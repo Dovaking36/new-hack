@@ -1,4 +1,6 @@
 import json
+import contextvars
+from typing import Optional
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -14,6 +16,7 @@ from system_prompts import system_prompt_v1
 # ================== НАСТРОЙКИ ==================
 CREDENTIALS = "MDE5Y2Q2OTYtMTk2ZC03YzVjLTgxZTQtOTk5NjhlNWRjYWFlOjFjZWU1YjI4LWRiYWUtNGIxMS05NGMyLTBlYmQ4NWEyMTVhYw=="
 HISTORY_DIR = "chat_history"
+current_chat_id_var = contextvars.ContextVar('current_chat_id', default=None)
 
 # ================== ИНСТРУМЕНТЫ ==================
 
@@ -24,46 +27,57 @@ async def summator(a: float, b: float) -> str:
     return json.dumps({"result": result, "expression": f"{a} + {b}"}, ensure_ascii=False)
 
 @tool
-async def get_chat_id(run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
-    """Возвращает ID текущего чата Telegram из контекста."""
-    if run_manager and run_manager.metadata:
-        chat_id = run_manager.metadata.get("chat_id")
-        if chat_id:
-            return json.dumps({"chat_id": chat_id}, ensure_ascii=False)
-    return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
+async def get_chat_id() -> str:
+    """Возвращает ID текущего чата Telegram."""
+    chat_id = current_chat_id_var.get()
+    if chat_id:
+        return json.dumps({"chat_id": chat_id}, ensure_ascii=False)
+    else:
+        return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
+
 
 def create_notification_tool(bot):
     @tool
-    async def send_notification(chat_id: int, text: str) -> str:
-        """Отправляет уведомление в указанный чат Telegram. Используй, когда нужно оповестить пользователей о чём-то важном."""
-        if not chat_id or not text:
-            return json.dumps({"error": "Не указаны chat_id или text"}, ensure_ascii=False)
+    async def send_notification(chat_id: Optional[int] = None, text: str = "") -> str:
+        """Отправляет уведомление в указанный чат Telegram. Если chat_id не указан, используется текущий чат."""
+        if not text:
+            return json.dumps({"error": "Не указан текст уведомления"}, ensure_ascii=False)
+
+        # Если chat_id не передан, берём из контекста
+        if chat_id is None:
+            chat_id = current_chat_id_var.get()
+            if chat_id is None:
+                return json.dumps({"error": "Не указан chat_id и не удалось определить из контекста"},
+                                  ensure_ascii=False)
+
         try:
             await bot.send_message(chat_id=chat_id, text=text)
             return json.dumps({"status": "ok", "message": "Уведомление отправлено"}, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
+
     return send_notification
+
 
 def create_read_history_tool(history_dir: str = HISTORY_DIR):
     history_path = Path(history_dir)
+
     @tool
     async def read_chat_history(
-        chat_id: Optional[int] = None,
-        limit: int = 50,
-        days: Optional[int] = None,
-        search: str = "",
-        run_manager: Optional[CallbackManagerForToolRun] = None,
+            chat_id: Optional[int] = None,
+            limit: int = 50,
+            days: Optional[int] = None,
+            search: str = "",
     ) -> str:
-        """Читает историю сообщений из указанного чата. Если chat_id не указан, используется текущий чат из контекста."""
-        # Если chat_id не передан, пытаемся получить из контекста
+        """Читает историю сообщений из указанного чата. Если chat_id не указан, используется текущий чат."""
+        # Если chat_id не передан, берём из контекста
         if chat_id is None:
-            if run_manager and run_manager.metadata:
-                chat_id = run_manager.metadata.get("chat_id")
+            chat_id = current_chat_id_var.get()
             if chat_id is None:
-                return json.dumps({"error": "Не указан chat_id и не удалось определить из контекста"}, ensure_ascii=False)
+                return json.dumps({"error": "Не указан chat_id и не удалось определить из контекста"},
+                                  ensure_ascii=False)
 
-        # Остальной код без изменений
+        # ... остальной код без изменений ...
         limit = min(limit, 200)
         search = search.lower()
         pattern = f"chat_{chat_id}_*_*.json"
