@@ -236,11 +236,26 @@ class GigaChatSingleton:
     _instance = None
     _executor = None
     _bot = None
+    _analysis_llm = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
+
+    async def get_analysis_llm(self):
+        """Возвращает экземпляр GigaChat для анализа истории (без инструментов)."""
+        if self._analysis_llm is None:
+            self._analysis_llm = GigaChat(
+                credentials=CREDENTIALS,
+                verify_ssl_certs=False,
+                model="GigaChat-Max",  # или "GigaChat"
+                temperature=0.0,
+                max_tokens=2000,
+                auto_upload_images=True
+                # Не указываем auto_upload и прочее
+            )
+        return self._analysis_llm
 
     def set_bot(self, bot):
         self._bot = bot

@@ -6,7 +6,7 @@ import os
 import sys
 import base64
 import tempfile
-from datetime import datetime
+from datetime import datetime,timedelta
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types
@@ -27,6 +27,7 @@ from history_utils import safe_json_load, safe_json_save, save_bot_message_to_hi
 CREDENTIALS = "8562857508:AAFW3w8W2u44fYte2LZCoorZ9pfOgieYKkc"
 HISTORY_DIR = "chat_history"
 TXT_EXPORT_DIR = "txt_exports"
+ANALYSIS_INTERVAL = 15
 
 Path(HISTORY_DIR).mkdir(exist_ok=True)
 Path(TXT_EXPORT_DIR).mkdir(exist_ok=True)
@@ -238,14 +239,7 @@ async def handle_photo(message: Message):
 
             prompt = message.caption or "Опиши это изображение подробно на русском языке. Если на изображении есть текст, извлеки его."
 
-            llm = GigaChat(
-                credentials="MDE5Y2Q2OTYtMTk2ZC03YzVjLTgxZTQtOTk5NjhlNWRjYWFlOjFjZWU1YjI4LWRiYWUtNGIxMS05NGMyLTBlYmQ4NWEyMTVhYw==",
-                verify_ssl_certs=False,
-                model="GigaChat-Max",
-                temperature=0.7,
-                max_tokens=1024,
-                auto_upload_images=True
-            )
+            llm = await gigachat_singleton.get_analysis_llm()
 
             human_msg = HumanMessage(
                 content=[
@@ -310,13 +304,7 @@ async def handle_voice(message: Message):
             )
 
             # Используем GigaChat с явной basic-авторизацией
-            llm = GigaChat(
-                credentials=CREDENTIALS,
-                verify_ssl_certs=False,
-                model="GigaChat-Pro",
-                temperature=0.0,
-                max_tokens=1024,
-            )
+            llm = await gigachat_singleton.get_analysis_llm()
             response = await llm.agenerate([[human_msg]])
             text = response.generations[0][0].text.strip()
 
@@ -388,6 +376,158 @@ async def welcome(message: Message):
             )
 
 # ================== ЗАПУСК ==================
+async def collect_recent_messages(chat_id: int, hours: int = 24) -> str:
+    """Собирает сообщения за последние N часов и возвращает их в виде текста."""
+    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_timestamp = cutoff_time.timestamp()
+    logger.info(f"📊 Собираем сообщения для чата {chat_id} за последние {hours} часов (с {cutoff_time})")
+
+    pattern = f"chat_{chat_id}_*_*.json"
+    files = sorted(Path(HISTORY_DIR).glob(pattern))
+    if not files:
+        logger.warning(f"⚠️ Нет файлов истории для чата {chat_id}")
+        return ""
+
+    all_msgs = []
+    for file in files:
+        try:
+            msgs = safe_json_load(file)
+            for msg in msgs:
+                msg_time = msg.get('unix_time', 0)
+                if msg_time > cutoff_timestamp:
+                    timestamp = datetime.fromtimestamp(msg_time).strftime('%Y-%m-%d %H:%M')
+                    user = msg['user'].get('username') or msg['user']['first_name']
+                    text = msg.get('text', '')
+                    if text:
+                        all_msgs.append(f"[{timestamp}] {user}: {text}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка чтения файла {file}: {e}")
+            continue
+
+    logger.info(f"✅ Найдено {len(all_msgs)} сообщений за период")
+    if all_msgs:
+        logger.debug(f"📌 Первые 3 сообщения: {all_msgs[:3]}")
+    return "\n".join(all_msgs)
+
+
+async def analyze_events(chat_id: int, chat_title: str, history_text: str) -> list:
+    if not history_text.strip():
+        return []
+
+    prompt = f"""Ты — ассистент, который анализирует историю чата и находит важные события, о которых нужно напомнить участникам. Вот история чата "{chat_title}" за последние 24 часа:
+
+{history_text}
+
+Найди в этой истории упоминания о событиях (встречи, собрания, мероприятия, дедлайны, важные объявления), которые имеют конкретную дату и время. Для каждого события определи:
+- Краткое описание (что за событие)
+- Дата и время события в формате ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-03-14 15:00). Если указана только дата (например, "завтра" или "14 марта"), используй время 00:00.
+- За сколько часов до события нужно отправить напоминание (целое число). Если не указано, используй 2 часа для событий с временем, и 24 часа для событий без времени (на весь день).
+
+Верни результат строго в формате JSON: список объектов с полями "event", "datetime", "remind_before_hours". Если событий нет, верни пустой список [].
+"""
+
+    llm = await gigachat_singleton.get_analysis_llm()
+    try:
+        response = await llm.ainvoke(prompt)
+        content = response.content.strip()
+
+        import re
+        json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
+        if json_match:
+            events = json.loads(json_match.group())
+        else:
+            try:
+                events = json.loads(content)
+            except json.JSONDecodeError:
+                events = []
+                logger.warning(f"Модель вернула не JSON: {content}")
+
+        for ev in events:
+            ev['remind_before_hours'] = int(ev.get('remind_before_hours', 2))
+        return events
+    except Exception as e:
+        logger.error(f"Ошибка при анализе событий для чата {chat_id}: {e}")
+        return []
+
+async def send_reminder(bot, chat_id: int, event: dict):
+    """Отправляет напоминание о событии в чат."""
+    text = f"🔔 **Напоминание**\n\n{event['event']}\n\n⏰ Время события: {event['datetime']}"
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
+        logger.info(f"Отправлено напоминание в чат {chat_id}: {event['event']}")
+    except Exception as e:
+        logger.error(f"Не удалось отправить напоминание в чат {chat_id}: {e}")
+
+async def periodic_analysis():
+    """Фоновая задача: каждые ANALYSIS_INTERVAL секунд анализирует историю чатов."""
+    await asyncio.sleep(60)  # подождём минуту после старта, чтобы бот успел инициализироваться
+    while True:
+        try:
+            logger.info("🔄 Запуск периодического анализа истории чатов")
+            # Найдём все уникальные chat_id из файлов истории
+            chat_ids = set()
+            for file in Path(HISTORY_DIR).glob("chat_*_*.json"):
+                parts = file.stem.split('_')
+                if len(parts) >= 2:
+                    try:
+                        chat_id = int(parts[1])
+                        chat_ids.add(chat_id)
+                    except ValueError:
+                        continue
+
+            for chat_id in chat_ids:
+                try:
+                    # Получим историю за последние 24 часа
+                    history_text = await collect_recent_messages(chat_id, hours=24)
+                    if not history_text:
+                        continue
+
+                    # Получим название чата (можно из первого файла)
+                    chat_title = "Чат"
+                    # Анализируем события
+                    events = await analyze_events(chat_id, chat_title, history_text)
+
+                    now = datetime.now()
+                    for event in events:
+                        try:
+                            # Пробуем распарсить дату-время
+                            event_datetime_str = event['datetime']
+                            # Если в строке нет времени, добавляем " 00:00"
+                            if len(event_datetime_str) == 10:  # только дата
+                                event_datetime_str += " 00:00"
+                            event_time = datetime.strptime(event_datetime_str, "%Y-%m-%d %H:%M")
+                        except Exception as e:
+                            logger.warning(f"Не удалось распарсить дату события: {event['datetime']}, ошибка: {e}")
+                            continue
+
+                        remind_before = timedelta(hours=event.get('remind_before_hours', 2))
+                        remind_time = event_time - remind_before
+                        logger.info(
+                            f"Событие: {event['event']}, время: {event_time}, напомнить за {remind_before} -> {remind_time}")
+                        logger.info(
+                            f"Текущее время: {now}, разница: {(remind_time - now).total_seconds() / 3600:.2f} ч")
+                        # Если время напоминания уже прошло, но событие ещё не наступило, можно отправить сейчас?
+                        # Проверяем, что remind_time не слишком далеко в будущем (например, в пределах следующих ANALYSIS_INTERVAL секунд)
+                        if remind_time <= now <= remind_time + timedelta(seconds=ANALYSIS_INTERVAL):
+                            await send_reminder(bot, chat_id, event)
+                        elif remind_time > now and remind_time - now < timedelta(seconds=ANALYSIS_INTERVAL):
+                            # Скоро наступит время напоминания (в пределах интервала), отправляем заранее
+                            await send_reminder(bot, chat_id, event)
+                        elif remind_time < now and event_time > now:
+                            # Напоминание должно было быть отправлено раньше, но событие ещё не наступило
+                            # Отправляем сейчас, как запоздалое напоминание
+                            await send_reminder(bot, chat_id, event)
+
+                    # Небольшая задержка между чатами
+                    await asyncio.sleep(5)
+
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке чата {chat_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Критическая ошибка в periodic_analysis: {e}")
+
+        await asyncio.sleep(ANALYSIS_INTERVAL)
 async def on_startup():
     logger.info("🚀 Бот запускается...")
     gigachat_singleton.set_bot(bot)
@@ -397,6 +537,8 @@ async def on_startup():
     except Exception as e:
         logger.error(f"❌ Ошибка инициализации агента: {e}")
         raise
+    asyncio.create_task(periodic_analysis())
+    logger.info("✅ Фоновая задача анализа запущена")
 
 async def on_shutdown():
     logger.info("👋 Бот останавливается...")
