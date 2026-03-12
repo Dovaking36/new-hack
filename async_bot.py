@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import base64
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -19,11 +20,11 @@ from aiogram.types import ErrorEvent
 from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage
 
-from agent import gigachat_singleton
-from agent import current_chat_id_var
+from agent import gigachat_singleton, current_chat_id_var
+from history_utils import safe_json_load, safe_json_save, save_bot_message_to_history
 
 # ================== НАСТРОЙКИ ==================
-TOKEN = "8562857508:AAFW3w8W2u44fYte2LZCoorZ9pfOgieYKkc"
+CREDENTIALS = "8562857508:AAFW3w8W2u44fYte2LZCoorZ9pfOgieYKkc"
 HISTORY_DIR = "chat_history"
 TXT_EXPORT_DIR = "txt_exports"
 
@@ -37,7 +38,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=CREDENTIALS)
 dp = Dispatcher()
 
 # ================== ОБРАБОТЧИК ОШИБОК ==================
@@ -46,56 +47,7 @@ async def errors_handler(event: ErrorEvent):
     logger.error(f"❌ Ошибка при обработке обновления {event.update}: {event.exception}", exc_info=True)
     return True
 
-# ================== БЕЗОПАСНАЯ РАБОТА С JSON ==================
-def safe_json_load(filepath):
-    """Безопасно загружает JSON, восстанавливая повреждённые файлы"""
-    try:
-        if not os.path.exists(filepath):
-            return []
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-        if not content:
-            return []
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Повреждённый JSON в {filepath}, пробую восстановить: {e}")
-            last_bracket = content.rfind(']')
-            if last_bracket > 0:
-                content = content[:last_bracket+1]
-                try:
-                    return json.loads(content)
-                except:
-                    pass
-            backup_path = filepath + '.bak'
-            try:
-                os.rename(filepath, backup_path)
-                logger.info(f"Создан бэкап повреждённого файла: {backup_path}")
-            except:
-                pass
-            return []
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке {filepath}: {e}")
-        return []
-
-def safe_json_save(filepath, data):
-    """Безопасно сохраняет JSON с временным файлом"""
-    temp_path = filepath + '.tmp'
-    try:
-        with open(temp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp_path, filepath)
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении {filepath}: {e}")
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-        return False
-
+# ================== СОХРАНЕНИЕ В JSON ==================
 def save_message_to_json_sync(message: Message):
     """Сохраняет сообщение в JSON с защитой от повреждений"""
     try:
@@ -142,39 +94,6 @@ async def safe_save_message(message: Message):
     except Exception as e:
         logger.error(f"Ошибка сохранения: {e}", exc_info=True)
 
-async def save_bot_message_to_history(chat_id: int, text: str, reply_to_message_id: int, bot_id: int, bot_username: str):
-    """Сохраняет сообщение бота в JSON историю."""
-    try:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        chat_type = 'private' if chat_id > 0 else 'group'
-        filename = f"{HISTORY_DIR}/chat_{chat_id}_{chat_type}_{date_str}.json"
-
-        messages = safe_json_load(filename)
-
-        message_data = {
-            "id": f"bot_{int(time.time())}_{reply_to_message_id}",
-            "timestamp": datetime.now().isoformat(),
-            "unix_time": int(datetime.now().timestamp()),
-            "user": {
-                "id": bot_id,
-                "username": bot_username,
-                "first_name": "Bot",
-                "last_name": ""
-            },
-            "chat": {
-                "id": chat_id,
-                "type": chat_type,
-                "title": None
-            },
-            "text": text,
-            "reply_to_message_id": reply_to_message_id
-        }
-
-        messages.append(message_data)
-        safe_json_save(filename, messages)
-    except Exception as e:
-        logger.error(f"Ошибка сохранения ответа бота: {e}", exc_info=True)
-
 # ================== ОБРАБОТЧИКИ КОМАНД ==================
 @dp.message(Command("bot"))
 async def cmd_bot(message: Message):
@@ -191,14 +110,12 @@ async def cmd_bot(message: Message):
             executor = await gigachat_singleton.get_executor()
             start = time.monotonic()
 
-
             token = current_chat_id_var.set(message.chat.id)
             try:
                 result = await executor.ainvoke({"input": user_message})
                 answer = result["output"]
             finally:
                 current_chat_id_var.reset(token)
-
 
             logger.info(f"Обработка заняла {time.monotonic() - start:.2f} сек")
             await message.reply(answer)
@@ -321,14 +238,13 @@ async def handle_photo(message: Message):
 
             prompt = message.caption or "Опиши это изображение подробно на русском языке. Если на изображении есть текст, извлеки его."
 
-            # Используем напрямую модель GigaChat (без агента, т.к. инструменты для фото не нужны)
             llm = GigaChat(
                 credentials="MDE5Y2Q2OTYtMTk2ZC03YzVjLTgxZTQtOTk5NjhlNWRjYWFlOjFjZWU1YjI4LWRiYWUtNGIxMS05NGMyLTBlYmQ4NWEyMTVhYw==",
                 verify_ssl_certs=False,
                 model="GigaChat-Max",
                 temperature=0.7,
                 max_tokens=1024,
-                auto_upload_images=True,
+                auto_upload_images=True
             )
 
             human_msg = HumanMessage(
@@ -353,7 +269,7 @@ async def handle_photo(message: Message):
                 text=answer,
                 reply_to_message_id=message.message_id,
                 bot_id=bot_me.id,
-                bot_username=bot_me.username
+                bot_username=bot_me.username,
             )
 
             logger.info(f"Обработано фото от {message.from_user.id}")
@@ -361,6 +277,70 @@ async def handle_photo(message: Message):
             logger.error(f"Ошибка при обработке фото: {e}", exc_info=True)
             await message.reply("❌ Не удалось обработать изображение.")
 
+# ================== ОБРАБОТЧИК ГОЛОСОВЫХ СООБЩЕНИЙ ==================
+@dp.message(F.voice)
+async def handle_voice(message: Message):
+    asyncio.create_task(safe_save_message(message))
+
+    voice = message.voice
+    file = await bot.get_file(voice.file_id)
+    file_path = file.file_path
+
+    # Скачиваем аудио во временный файл
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        await bot.download_file(file_path, tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
+            # Конвертируем аудио в base64
+            with open(tmp_path, "rb") as f:
+                audio_base64 = base64.b64encode(f.read()).decode('utf-8')
+
+            # Создаём сообщение с аудио
+            prompt = "Распознай речь в этом аудио и выведи текст."
+            human_msg = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "audio_url",
+                        "audio_url": {"url": f"data:audio/ogg;base64,{audio_base64}"}
+                    }
+                ]
+            )
+
+            # Используем GigaChat с явной basic-авторизацией
+            llm = GigaChat(
+                credentials=CREDENTIALS,
+                verify_ssl_certs=False,
+                model="GigaChat-Pro",
+                temperature=0.0,
+                max_tokens=1024,
+            )
+            response = await llm.agenerate([[human_msg]])
+            text = response.generations[0][0].text.strip()
+
+        if not text:
+            text = "[Не удалось распознать речь]"
+
+        await message.reply(f"📝 Распознано: {text}")
+
+        # Сохраняем транскрипцию в историю как сообщение от бота
+        bot_me = await bot.me()
+        await save_bot_message_to_history(
+            chat_id=message.chat.id,
+            text=f"🎤 Голосовое сообщение расшифровано: {text}",
+            reply_to_message_id=message.message_id,
+            bot_id=bot_me.id,
+            bot_username=bot_me.username
+        )
+
+        logger.info(f"Голосовое от {message.from_user.id} транскрибировано: {text[:50]}...")
+    except Exception as e:
+        logger.error(f"Ошибка транскрипции через GigaChat: {e}", exc_info=True)
+        await message.reply("❌ Не удалось распознать речь.")
+    finally:
+        os.unlink(tmp_path)
 # ================== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ТЕКСТА ==================
 @dp.message()
 async def handle_all_text(message: Message):
@@ -384,14 +364,12 @@ async def handle_all_text(message: Message):
             try:
                 executor = await gigachat_singleton.get_executor()
 
-
                 token = current_chat_id_var.set(message.chat.id)
                 try:
                     result = await executor.ainvoke({"input": message.text})
                     answer = result["output"]
                 finally:
                     current_chat_id_var.reset(token)
-
 
                 await message.reply(answer)
             except Exception as e:
