@@ -64,7 +64,7 @@ async def cmd_bot(message: Message):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         try:
             start = datetime.now()
-            # Устанавливаем ID текущего чата в контекстную переменную для инструментов
+
             token = current_chat_id_var.set(message.chat.id)
             try:
                 answer = await gigachat_singleton.ainvoke_with_history(message.chat.id, user_message)
@@ -167,7 +167,7 @@ async def handle_photo(message: Message):
 
             llm = await gigachat_singleton.get_analysis_llm()
 
-            # Используем правильный HumanMessage из langchain_core.messages
+
             human_msg = HumanMessage(
                 content=[
                     {"type": "text", "text": prompt},
@@ -201,25 +201,25 @@ async def handle_photo(message: Message):
 async def handle_voice(message: Message):
     asyncio.create_task(safe_save_message(message))
     voice = message.voice
-    tmp_path = None  # Для очистки в finally
+    tmp_path = None  
 
     try:
-        # 1. Скачиваем файл от Telegram (как и раньше)
+
         file = await bot.get_file(voice.file_id)
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             await bot.download_file(file.file_path, tmp.name)
             tmp_path = tmp.name
 
         async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-            # 2. Получаем асинхронный клиент GigaChat из синглтона
+
             client = await gigachat_singleton.get_async_client()
 
-            # Загружаем аудио
+
             with open(tmp_path, "rb") as f:
                 uploaded = await client.aupload_file(f, purpose="general")
             audio_file_id = uploaded.id_
 
-            # Запрос на транскрибацию
+
             response = await client.achat({
                 "model": "GigaChat-Max",
                 "messages": [
@@ -231,10 +231,10 @@ async def handle_voice(message: Message):
                 ],
                 "temperature": 0.0,
             })
-            # Извлекаем текст ответа
+
             transcribed_text = response.choices[0].message.content.strip()
 
-            # 5. (Опционально) Удаляем файл из хранилища, если он больше не нужен
+
             # await client.delete_file(file_id)
 
         if not transcribed_text:
@@ -242,7 +242,7 @@ async def handle_voice(message: Message):
 
         await message.reply(f"📝 Распознано: {transcribed_text}")
 
-        # Сохраняем в историю (как и раньше)
+
         bot_me = await bot.me()
         await asyncio.to_thread(
             save_bot_message,
