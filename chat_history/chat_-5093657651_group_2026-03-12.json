@@ -202,5 +202,430 @@
       "title": "Resonance"
     },
     "text": "/bot сколько сейчас времени и какая сейчас дата"
+  },
+  {
+    "id": 863,
+    "timestamp": "2026-03-12T22:47:56+00:00",
+    "unix_time": 1773355676,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot дай всю важную информацию за недавнее время"
+  },
+  {
+    "id": 865,
+    "timestamp": "2026-03-12T22:50:14+00:00",
+    "unix_time": 1773355814,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot можешь расскать по подробнее что говорилось в части диалога где написано \"раг не нужен\""
+  },
+  {
+    "id": 877,
+    "timestamp": "2026-03-12T23:08:04+00:00",
+    "unix_time": 1773356884,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/help"
+  },
+  {
+    "id": 879,
+    "timestamp": "2026-03-12T23:09:33+00:00",
+    "unix_time": 1773356973,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "Я тут, что кого?"
+  },
+  {
+    "id": 880,
+    "timestamp": "2026-03-12T23:09:58+00:00",
+    "unix_time": 1773356998,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/help"
+  },
+  {
+    "id": 882,
+    "timestamp": "2026-03-12T23:10:15+00:00",
+    "unix_time": 1773357015,
+    "user": {
+      "id": 1205813503,
+      "username": "Nik0St9",
+      "first_name": "Николай",
+      "last_name": null
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot я тут, что кого?"
+  },
+  {
+    "id": 886,
+    "timestamp": "2026-03-12T23:11:57+00:00",
+    "unix_time": 1773357117,
+    "user": {
+      "id": 7408513249,
+      "username": "cuteunicorn18",
+      "first_name": "Даня",
+      "last_name": "Мартин"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чём этот файл"
+  },
+  {
+    "id": 888,
+    "timestamp": "2026-03-12T23:12:21+00:00",
+    "unix_time": 1773357141,
+    "user": {
+      "id": 7408513249,
+      "username": "cuteunicorn18",
+      "first_name": "Даня",
+      "last_name": "Мартин"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чём последний exel файл"
+  },
+  {
+    "id": 890,
+    "timestamp": "2026-03-12T23:13:19+00:00",
+    "unix_time": 1773357199,
+    "user": {
+      "id": 7408513249,
+      "username": "cuteunicorn18",
+      "first_name": "Даня",
+      "last_name": "Мартин"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чём последний exel файл"
+  },
+  {
+    "id": 894,
+    "timestamp": "2026-03-12T23:32:44+00:00",
+    "unix_time": 1773358364,
+    "user": {
+      "id": 7408513249,
+      "username": "cuteunicorn18",
+      "first_name": "Даня",
+      "last_name": "Мартин"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чём последний pdf"
+  },
+  {
+    "id": 898,
+    "timestamp": "2026-03-12T23:38:56+00:00",
+    "unix_time": 1773358736,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем был последний pdf"
+  },
+  {
+    "id": 900,
+    "timestamp": "2026-03-12T23:41:12+00:00",
+    "unix_time": 1773358872,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем был последний pdf"
+  },
+  {
+    "id": 904,
+    "timestamp": "2026-03-12T23:42:12+00:00",
+    "unix_time": 1773358932,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем был последний пдф"
+  },
+  {
+    "id": 906,
+    "timestamp": "2026-03-12T23:42:56+00:00",
+    "unix_time": 1773358976,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "Завтра пары отменяются"
+  },
+  {
+    "id": 909,
+    "timestamp": "2026-03-12T23:45:50+00:00",
+    "unix_time": 1773359150,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем был последний пдф"
+  },
+  {
+    "id": 914,
+    "timestamp": "2026-03-12T23:47:58+00:00",
+    "unix_time": 1773359278,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем был последний пдф"
+  },
+  {
+    "id": 917,
+    "timestamp": "2026-03-12T23:49:04+00:00",
+    "unix_time": 1773359344,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем был последний пдф"
+  },
+  {
+    "id": 919,
+    "timestamp": "2026-03-12T23:49:37+00:00",
+    "unix_time": 1773359377,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot расскажи что написано в этом файле"
+  },
+  {
+    "id": 923,
+    "timestamp": "2026-03-12T23:50:53+00:00",
+    "unix_time": 1773359453,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot о чем последний пдф"
+  },
+  {
+    "id": 925,
+    "timestamp": "2026-03-12T23:52:44+00:00",
+    "unix_time": 1773359564,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot"
+  },
+  {
+    "id": 927,
+    "timestamp": "2026-03-12T23:53:11+00:00",
+    "unix_time": 1773359591,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot какой результат по предварительной оценке НПА"
+  },
+  {
+    "id": 929,
+    "timestamp": "2026-03-12T23:54:34+00:00",
+    "unix_time": 1773359674,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot какие сроки приёма замечаний и предложений"
+  },
+  {
+    "id": 931,
+    "timestamp": "2026-03-12T23:55:00+00:00",
+    "unix_time": 1773359700,
+    "user": {
+      "id": 1013059816,
+      "username": "Abemeiopanii",
+      "first_name": "Живу",
+      "last_name": "Жизнь"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot какие сроки приёма замечаний и предложений в последнем pdf файле"
+  },
+  {
+    "id": 936,
+    "timestamp": "2026-03-12T23:57:17+00:00",
+    "unix_time": 1773359837,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot какие сроки приёма замечаний и предложений в последнем pdf файле"
+  },
+  {
+    "id": 938,
+    "timestamp": "2026-03-12T23:57:52+00:00",
+    "unix_time": 1773359872,
+    "user": {
+      "id": 1207955435,
+      "username": "egorovvdm",
+      "first_name": "Дмитрий",
+      "last_name": "Егоров"
+    },
+    "chat": {
+      "id": -5093657651,
+      "type": "group",
+      "title": "Resonance"
+    },
+    "text": "/bot какие сроки приёма замечаний и предложений в последнем pdf файле"
   }
 ]
