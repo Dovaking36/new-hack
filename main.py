@@ -1,3 +1,9 @@
+"""
+Главный модуль Telegram-бота с интеграцией GigaChat.
+
+Обрабатывает команды, сообщения, файлы и фоновые задачи анализа истории.
+"""
+
 import asyncio
 import logging
 import sys
@@ -17,7 +23,7 @@ from aiogram.types import ErrorEvent
 from langchain_core.messages import HumanMessage
 
 from config import TELEGRAM_BOT_TOKEN, HISTORY_DIR, ANALYSIS_INTERVAL
-from agent import gigachat_singleton, current_chat_id_var, last_excel_file,last_pdf_file
+from agent import gigachat_singleton, current_chat_id_var, last_excel_file, last_pdf_file
 from history import (
     save_user_message,
     save_bot_message,
@@ -27,7 +33,6 @@ from history import (
 )
 from analysis import analyze_events, send_reminder
 
-# ================== НАСТРОЙКИ ==================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -38,23 +43,25 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# ================== ОБРАБОТЧИК ОШИБОК ==================
+
 @dp.error()
 async def errors_handler(event: ErrorEvent):
+    """Глобальный обработчик ошибок."""
     logger.error(f"❌ Ошибка при обработке обновления {event.update}: {event.exception}", exc_info=True)
     return True
 
-# ================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==================
+
 async def safe_save_message(message: Message):
-    """Асинхронно сохраняет сообщение пользователя в историю."""
+    """Асинхронно сохраняет сообщение пользователя в историю (в потоке)."""
     try:
         await asyncio.to_thread(save_user_message, message)
     except Exception as e:
         logger.error(f"Ошибка сохранения: {e}", exc_info=True)
 
-# ================== ОБРАБОТЧИКИ КОМАНД ==================
+
 @dp.message(Command("bot"))
 async def cmd_bot(message: Message):
+    """Обработчик команды /bot для прямого обращения к агенту."""
     asyncio.create_task(safe_save_message(message))
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
@@ -64,7 +71,6 @@ async def cmd_bot(message: Message):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         try:
             start = datetime.now()
-
             token = current_chat_id_var.set(message.chat.id)
             try:
                 answer = await gigachat_singleton.ainvoke_with_history(message.chat.id, user_message)
@@ -80,6 +86,7 @@ async def cmd_bot(message: Message):
 
 @dp.message(Command("get_history"))
 async def cmd_history(message: Message):
+    """Экспортирует всю историю чата в текстовый файл и отправляет его."""
     asyncio.create_task(safe_save_message(message))
 
     if message.chat.type not in ['group', 'supergroup']:
@@ -100,8 +107,10 @@ async def cmd_history(message: Message):
         logger.error(f"Ошибка /get_history: {e}", exc_info=True)
         await wait_msg.edit_text(f"❌ Ошибка: {e}")
 
+
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
+    """Показывает статистику по сохранённым сообщениям в чате."""
     asyncio.create_task(safe_save_message(message))
 
     if message.chat.type not in ['group', 'supergroup']:
@@ -133,28 +142,43 @@ async def cmd_stats(message: Message):
             f"💬 Сообщений: {total}\n👥 Участников: {len(users)}\n📈 Среднее: {total//len(json_files) if json_files else 0}")
     await message.reply(text, parse_mode=ParseMode.HTML)
 
+
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
+    """Выводит справку по командам и возможностям бота."""
     asyncio.create_task(safe_save_message(message))
     text = (
-        "📚 <b>Команды</b>\n"
-        "/bot [текст] – задать вопрос\n"
-        "/get_history – история группы\n"
-        "/stats – статистика\n"
-        "/help – помощь\n\n"
-        "В личных сообщениях отвечаю на любой текст.\n"
-        "В группах отвечаю, если упомянуть (@bot) или начать с 'бот'."
+        "📚 <b>Помощь по боту GigaChat Assistant</b>\n\n"
+        "<b>Команды:</b>\n"
+        "/bot [текст] – задать вопрос GigaChat\n"
+        "/get_history – экспорт истории чата в .txt\n"
+        "/stats – статистика сообщений в чате\n"
+        "/help – это сообщение\n\n"
+        "<b>Возможности:</b>\n"
+        "• 📊 <b>Excel</b> – отправьте файл, затем спросите о нём (инструмент read_excel_file)\n"
+        "• 📄 <b>PDF</b> – текст + OCR для сканов (read_pdf_file)\n"
+        "• 🎤 <b>Голосовые сообщения</b> – автоматическая расшифровка (transcribe_audio)\n"
+        "• 🖼 <b>Изображения</b> – описание и извлечение текста (GigaChat Vision)\n"
+        "• 🔔 <b>Уведомления</b> – попросите отправить сообщение в чат (send_notification)\n"
+        "• 📜 <b>Анализ истории</b> – спросите «о чём говорили вчера?» (read_chat_history)\n"
+        "• ➕ <b>Калькулятор</b> – сложение чисел (summator)\n\n"
+        "<b>В группах:</b> упомяните меня @bot или начните сообщение с «бот».\n"
+        "<b>В личных сообщениях</b> отвечаю на любой текст.\n\n"
+        "📁 Все сообщения автоматически сохраняются в историю."
     )
     await message.reply(text, parse_mode=ParseMode.HTML)
 
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
+    """Приветственное сообщение."""
     asyncio.create_task(safe_save_message(message))
     await message.reply("👋 Привет! Я бот для работы с GigaChat. Используй /help.")
 
-# ================== ОБРАБОТЧИК ФОТО ==================
+
 @dp.message(F.photo)
 async def handle_photo(message: Message):
+    """Обрабатывает фотографии с помощью GigaChat Vision."""
     asyncio.create_task(safe_save_message(message))
     photo = message.photo[-1]
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
@@ -166,7 +190,6 @@ async def handle_photo(message: Message):
             prompt = message.caption or "Опиши это изображение подробно на русском языке. Если на изображении есть текст, извлеки его."
 
             llm = await gigachat_singleton.get_analysis_llm()
-
 
             human_msg = HumanMessage(
                 content=[
@@ -195,30 +218,26 @@ async def handle_photo(message: Message):
             logger.error(f"Ошибка при обработке фото: {e}", exc_info=True)
             await message.reply("❌ Не удалось обработать изображение.")
 
-# ================== ОБРАБОТЧИК ГОЛОСОВЫХ СООБЩЕНИЙ ==================
-# main.py
+
 @dp.message(F.voice)
 async def handle_voice(message: Message):
+    """Транскрибирует голосовое сообщение через GigaChat."""
     asyncio.create_task(safe_save_message(message))
     voice = message.voice
-    tmp_path = None  
+    tmp_path = None
 
     try:
-
         file = await bot.get_file(voice.file_id)
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             await bot.download_file(file.file_path, tmp.name)
             tmp_path = tmp.name
 
         async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-
             client = await gigachat_singleton.get_async_client()
-
 
             with open(tmp_path, "rb") as f:
                 uploaded = await client.aupload_file(f, purpose="general")
             audio_file_id = uploaded.id_
-
 
             response = await client.achat({
                 "model": "GigaChat-Max",
@@ -234,14 +253,10 @@ async def handle_voice(message: Message):
 
             transcribed_text = response.choices[0].message.content.strip()
 
-
-            # await client.delete_file(file_id)
-
         if not transcribed_text:
             transcribed_text = "[Не удалось распознать речь]"
 
         await message.reply(f"📝 Распознано: {transcribed_text}")
-
 
         bot_me = await bot.me()
         await asyncio.to_thread(
@@ -263,21 +278,21 @@ async def handle_voice(message: Message):
 
 @dp.message(F.document)
 async def handle_document(message: Message):
+    """
+    Обрабатывает документы: сохраняет file_id для Excel и PDF,
+    чтобы потом использовать в инструментах агента.
+    """
     asyncio.create_task(safe_save_message(message))
     document = message.document
 
     logger.info(f"Получен документ: {document.file_name}, MIME: {document.mime_type}, размер: {document.file_size}")
 
-    # MIME-типы для Excel
     excel_mime_types = [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
         'application/vnd.ms-excel',                                           # .xls
         'application/vnd.oasis.opendocument.spreadsheet',                    # .ods
     ]
-    # MIME-типы для PDF
-    pdf_mime_types = [
-        'application/pdf',
-    ]
+    pdf_mime_types = ['application/pdf']
 
     if document.mime_type in excel_mime_types:
         last_excel_file[message.chat.id] = document.file_id
@@ -295,9 +310,14 @@ async def handle_document(message: Message):
         )
     else:
         await message.reply("Я пока умею работать только с Excel и PDF файлами. Пожалуйста, отправьте .xlsx, .xls или .pdf.")
-# ================== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ТЕКСТА ==================
+
+
 @dp.message()
 async def handle_all_text(message: Message):
+    """
+    Универсальный обработчик текстовых сообщений.
+    В личных чатах отвечает всегда, в группах – только при упоминании.
+    """
     logger.info(f"📩 Входящее сообщение: chat={message.chat.id}, user={message.from_user.id}, text={message.text[:50] if message.text else 'нет текста'}")
     asyncio.create_task(safe_save_message(message))
 
@@ -327,9 +347,9 @@ async def handle_all_text(message: Message):
                 await message.reply("❌ Произошла ошибка")
 
 
-# ================== ПРИВЕТСТВИЕ НОВЫХ УЧАСТНИКОВ ==================
 @dp.message(F.new_chat_members)
 async def welcome(message: Message):
+    """Приветствие при добавлении бота в группу."""
     bot_user = await bot.me()
     for member in message.new_chat_members:
         if member.id == bot_user.id:
@@ -338,9 +358,9 @@ async def welcome(message: Message):
                 "Упомяните меня @bot, чтобы поговорить."
             )
 
-# ================== ФОНОВАЯ ЗАДАЧА АНАЛИЗА ==================
+
 async def periodic_analysis():
-    """Фоновая задача: каждые ANALYSIS_INTERVAL секунд анализирует историю чатов."""
+    """Фоновая задача: анализ истории чатов и отправка напоминаний о событиях."""
     await asyncio.sleep(60)
     while True:
         try:
@@ -377,6 +397,7 @@ async def periodic_analysis():
 
                         remind_before = timedelta(hours=event.get('remind_before_hours', 2))
                         remind_time = event_time - remind_before
+                        # Отправляем напоминание, если наступило время
                         if remind_time <= now <= remind_time + timedelta(seconds=ANALYSIS_INTERVAL):
                             await send_reminder(bot, chat_id, event)
                         elif remind_time > now and remind_time - now < timedelta(seconds=ANALYSIS_INTERVAL):
@@ -393,8 +414,9 @@ async def periodic_analysis():
 
         await asyncio.sleep(ANALYSIS_INTERVAL)
 
-# ================== ЗАПУСК ==================
+
 async def on_startup():
+    """Действия при запуске бота."""
     logger.info("🚀 Бот запускается...")
     gigachat_singleton.set_bot(bot)
     try:
@@ -406,14 +428,19 @@ async def on_startup():
     asyncio.create_task(periodic_analysis())
     logger.info("✅ Фоновая задача анализа запущена")
 
+
 async def on_shutdown():
+    """Действия при остановке бота."""
     logger.info("👋 Бот останавливается...")
     await gigachat_singleton.close()
 
+
 async def main():
+    """Точка входа: регистрация обработчиков и запуск polling."""
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

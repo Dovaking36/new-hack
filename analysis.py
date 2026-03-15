@@ -10,10 +10,25 @@ from agent import gigachat_singleton
 
 logger = logging.getLogger(__name__)
 
+
 async def analyze_events(chat_id: int, chat_title: str, history_text: str) -> List[Dict[str, Any]]:
     """
-    Анализирует историю чата с помощью GigaChat и извлекает события.
-    Возвращает список событий в формате [{"event": str, "datetime": str, "remind_before_hours": int}].
+    Анализирует историю чата с помощью GigaChat и извлекает события для напоминаний.
+
+    Отправляет промпт с историей чата за последние 24 часа, просит модель найти события,
+    имеющие дату и время. Возвращает список событий в стандартизированном формате.
+
+    Args:
+        chat_id: Идентификатор чата Telegram.
+        chat_title: Название чата (для контекста в промпте).
+        history_text: Текст истории сообщений за последние 24 часа.
+
+    Returns:
+        Список событий. Каждый элемент — словарь с ключами:
+            - event (str): краткое описание события
+            - datetime (str): дата и время в формате "ГГГГ-ММ-ДД ЧЧ:ММ"
+            - remind_before_hours (int): за сколько часов до события отправить напоминание
+        Если событий нет или произошла ошибка, возвращается пустой список.
     """
     if not history_text.strip():
         return []
@@ -35,25 +50,40 @@ async def analyze_events(chat_id: int, chat_title: str, history_text: str) -> Li
         response = await llm.ainvoke(prompt)
         content = response.content.strip()
 
+        # Извлечение JSON из ответа модели (может быть обёрнут в markdown или пояснения)
         json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
         if json_match:
             events = json.loads(json_match.group())
         else:
-            try:
-                events = json.loads(content)
-            except json.JSONDecodeError:
-                events = []
-                logger.warning(f"Модель вернула не JSON: {content}")
+            # Попытка распарсить весь ответ как JSON
+            events = json.loads(content)
 
+        # Приведение remind_before_hours к целому числу
         for ev in events:
             ev['remind_before_hours'] = int(ev.get('remind_before_hours', 2))
+
         return events
+
+    except json.JSONDecodeError:
+        logger.warning(f"Модель вернула невалидный JSON для чата {chat_id}: {content}")
+        return []
     except Exception as e:
         logger.error(f"Ошибка при анализе событий для чата {chat_id}: {e}")
         return []
 
+
 async def send_reminder(bot, chat_id: int, event: Dict[str, Any]) -> None:
-    """Отправляет напоминание о событии в чат."""
+    """
+    Отправляет напоминание о событии в указанный чат Telegram.
+
+    Args:
+        bot: Экземпляр Telegram-бота (aiogram Bot).
+        chat_id: Идентификатор чата, куда отправляется напоминание.
+        event: Словарь с информацией о событии (поля 'event' и 'datetime').
+
+    Returns:
+        None
+    """
     text = f"🔔 **Напоминание**\n\n{event['event']}\n\n⏰ Время события: {event['datetime']}"
     try:
         await bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')

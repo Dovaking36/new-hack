@@ -5,15 +5,12 @@ import tempfile
 import os
 import asyncio
 import fitz
-import PyPDF2
-import base64
 from typing import Optional
 
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_gigachat import GigaChat
-from langchain_core.messages import HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from gigachat import GigaChatAsyncClient, RateLimitError
@@ -28,15 +25,25 @@ last_pdf_file = {}
 session_store = {}
 logger = logging.getLogger(__name__)
 
-# Переменная контекста для хранения ID текущего чата
+# Контекстная переменная для хранения ID текущего чата Telegram
 current_chat_id_var = contextvars.ContextVar('current_chat_id', default=None)
 
+
 def get_session_history(session_id: str) -> ChatMessageHistory:
+    """
+    Возвращает историю сообщений для указанной сессии.
+    Если сессия отсутствует, создаёт новую.
+    """
     if session_id not in session_store:
         session_store[session_id] = ChatMessageHistory()
     return session_store[session_id]
 
+
 def create_agent_with_memory(bot):
+    """
+    Создаёт исполнителя агента с поддержкой истории сообщений.
+    Возвращает RunnableWithMessageHistory, который автоматически управляет историей.
+    """
     executor = create_agent(bot)
     with_history = RunnableWithMessageHistory(
         executor,
@@ -46,6 +53,7 @@ def create_agent_with_memory(bot):
     )
     return with_history
 
+
 # ================== ИНСТРУМЕНТЫ ==================
 
 @tool
@@ -53,6 +61,7 @@ async def summator(a: float, b: float) -> str:
     """Складывает два числа и возвращает результат."""
     result = a + b
     return json.dumps({"result": result, "expression": f"{a} + {b}"}, ensure_ascii=False)
+
 
 @tool
 async def get_chat_id() -> str:
@@ -63,10 +72,16 @@ async def get_chat_id() -> str:
     else:
         return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
 
+
 def create_notification_tool(bot):
+    """Фабрика инструмента для отправки уведомлений в Telegram."""
+
     @tool
     async def send_notification(chat_id: Optional[int] = None, text: str = "") -> str:
-        """Отправляет уведомление в указанный чат Telegram. Если chat_id не указан, используется текущий чат."""
+        """
+        Отправляет уведомление в указанный чат Telegram.
+        Если chat_id не указан, используется текущий чат.
+        """
         if not text:
             return json.dumps({"error": "Не указан текст уведомления"}, ensure_ascii=False)
 
@@ -80,9 +95,13 @@ def create_notification_tool(bot):
             return json.dumps({"status": "ok", "message": "Уведомление отправлено"}, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"error": str(e)}, ensure_ascii=False)
+
     return send_notification
 
+
 def create_read_history_tool():
+    """Фабрика инструмента для чтения истории сообщений из базы данных."""
+
     @tool
     async def read_chat_history(
         chat_id: Optional[int] = None,
@@ -90,7 +109,10 @@ def create_read_history_tool():
         days: Optional[int] = None,
         search: str = "",
     ) -> str:
-        """Читает историю сообщений из указанного чата. Если chat_id не указан, используется текущий чат."""
+        """
+        Читает историю сообщений из указанного чата.
+        Если chat_id не указан, используется текущий чат.
+        """
         from history import load_chat_history, format_messages_for_display
 
         if chat_id is None:
@@ -112,9 +134,13 @@ def create_read_history_tool():
         if days:
             result["period"] = f"последние {days} дней"
         return json.dumps(result, ensure_ascii=False, indent=2)
+
     return read_chat_history
 
+
 def create_transcribe_tool(bot):
+    """Фабрика инструмента для транскрибации голосовых сообщений через GigaChat."""
+
     @tool
     async def transcribe_audio(file_id: str, chat_id: Optional[int] = None) -> str:
         """
@@ -122,25 +148,21 @@ def create_transcribe_tool(bot):
         """
         tmp_path = None
         try:
-            # 1. Скачиваем файл от Telegram
+            # Скачивание файла от Telegram
             file = await bot.get_file(file_id)
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 await bot.download_file(file.file_path, tmp.name)
                 tmp_path = tmp.name
 
-            # 2. Получаем клиент GigaChat (лучше брать из синглтона, но можно создать и здесь)
-            #    Для простоты создадим экземпляр внутри инструмента.
-            #    Внимание: для production лучше использовать пул соединений или синглтон.
             async with GigaChatAsyncClient(
                 credentials=GIGACHAT_CREDENTIALS,
                 verify_ssl_certs=False,
             ) as client:
-                # 3. Загружаем аудио
+
                 with open(tmp_path, "rb") as f:
                     uploaded = await client.aupload_file(f, purpose="general")
                 audio_file_id = uploaded.id
 
-                # 4. Делаем запрос на транскрибацию
                 response = await client.achat(
                     {
                         "model": "GigaChat-Max",
@@ -156,10 +178,8 @@ def create_transcribe_tool(bot):
                 )
                 text = response.choices[0].message.content.strip()
 
-            # 5. Сохраняем результат в историю (опционально, как в вашем коде)
             if chat_id:
                 bot_me = await bot.me()
-                # Функция save_bot_message должна быть доступна
                 save_bot_message(
                     chat_id=chat_id,
                     text=f"🎤 Транскрипция аудио (file_id {file_id}): {text}",
@@ -179,10 +199,10 @@ def create_transcribe_tool(bot):
 
     return transcribe_audio
 
+
 def create_read_excel_tool(bot):
+    """Фабрика инструмента для чтения Excel-файлов с помощью pandas."""
     import pandas as pd
-    import tempfile
-    import os
 
     @tool
     async def read_excel_file(
@@ -199,7 +219,6 @@ def create_read_excel_tool(bot):
             if chat_id is None:
                 return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
 
-        # Определяем file_id
         if file_id is None:
             file_id = last_excel_file.get(chat_id)
             if file_id is None:
@@ -207,20 +226,17 @@ def create_read_excel_tool(bot):
 
         tmp_path = None
         try:
-            # Скачиваем файл из Telegram
             file = await bot.get_file(file_id)
             with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
                 await bot.download_file(file.file_path, tmp.name)
                 tmp_path = tmp.name
 
-            # Читаем Excel
             if sheet_name:
                 df = pd.read_excel(tmp_path, sheet_name=sheet_name)
                 sheets_data = {sheet_name: df}
             else:
-                sheets_data = pd.read_excel(tmp_path, sheet_name=None)  # все листы
+                sheets_data = pd.read_excel(tmp_path, sheet_name=None)
 
-            # Формируем текстовое представление
             result_lines = []
             for name, df in sheets_data.items():
                 result_lines.append(f"--- Лист: {name} ---")
@@ -233,11 +249,9 @@ def create_read_excel_tool(bot):
                 result_lines.append("")
 
             full_text = "\n".join(result_lines)
-            # Ограничим длину (модель GigaChat имеет лимит контекста)
             if len(full_text) > 15000:
                 full_text = full_text[:15000] + "\n... (обрезка по длине)"
 
-            # Сохраняем в историю (неблокирующий вызов)
             bot_me = await bot.me()
             await asyncio.to_thread(
                 save_bot_message,
@@ -259,7 +273,10 @@ def create_read_excel_tool(bot):
 
     return read_excel_file
 
+
 def create_read_pdf_tool(bot):
+    """Фабрика инструмента для чтения PDF-файлов с извлечением текста и OCR при необходимости."""
+
     @tool
     async def read_pdf_file(
         file_id: Optional[str] = None,
@@ -276,7 +293,6 @@ def create_read_pdf_tool(bot):
             if chat_id is None:
                 return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
 
-        # Определяем корректный file_id
         target_file_id = file_id
         if target_file_id:
             try:
@@ -293,17 +309,15 @@ def create_read_pdf_tool(bot):
 
         tmp_pdf_path = None
         try:
-            # Скачиваем PDF из Telegram
             file = await bot.get_file(target_file_id)
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 await bot.download_file(file.file_path, tmp.name)
                 tmp_pdf_path = tmp.name
 
-            # Получаем асинхронный клиент GigaChat
             client = await gigachat_singleton.get_async_client()
 
-            # Синхронная обработка PDF в потоке
             def process_pdf_sync(pdf_path, start_page, end_page):
+                """Синхронная обработка PDF: извлечение текста и подготовка страниц для OCR."""
                 doc = fitz.open(pdf_path)
                 total_pages = len(doc)
                 start = max(1, start_page if start_page else 1)
@@ -320,7 +334,6 @@ def create_read_pdf_tool(bot):
                     if text:
                         extracted_text_parts.append(f"--- Страница {page_num} ---\n{text}")
                     else:
-                        # Страница без текста – готовим для OCR
                         pix = page.get_pixmap(dpi=150)
                         img_fd, img_path = tempfile.mkstemp(suffix=".png")
                         os.close(img_fd)
@@ -334,9 +347,9 @@ def create_read_pdf_tool(bot):
                 process_pdf_sync, tmp_pdf_path, page_start, page_end
             )
 
-            # OCR через GigaChat Vision
             ocr_results = []
             if pages_for_ocr:
+                # Обработка страниц с OCR пачками по 10 изображений
                 chunk_size = 10
                 for i in range(0, len(pages_for_ocr), chunk_size):
                     chunk = pages_for_ocr[i:i+chunk_size]
@@ -347,7 +360,7 @@ def create_read_pdf_tool(bot):
                         for page_num, img_path in chunk:
                             temp_img_files.append(img_path)
 
-                            # Загружаем изображение с повторными попытками при 429
+                            # Загрузка изображения с повторными попытками при RateLimit
                             for attempt in range(3):
                                 try:
                                     with open(img_path, "rb") as f:
@@ -360,12 +373,7 @@ def create_read_pdf_tool(bot):
                                     logger.warning(f"Rate limit при загрузке, повтор через {wait}с")
                                     await asyncio.sleep(wait)
 
-                            # Отладочный вывод для определения структуры uploaded
-                            logger.debug(f"Тип uploaded: {type(uploaded)}")
-                            logger.debug(f"Атрибуты: {dir(uploaded)}")
-                            logger.debug(f"Содержимое: {uploaded}")
-
-                            # Извлекаем UUID (поле может называться id или file_id)
+                            # Извлечение UUID загруженного файла
                             file_uuid = None
                             if hasattr(uploaded, 'id_'):
                                 file_uuid = uploaded.id_
@@ -374,7 +382,6 @@ def create_read_pdf_tool(bot):
                             elif isinstance(uploaded, dict):
                                 file_uuid = uploaded.get('id') or uploaded.get('file_id')
                             else:
-                                # Если ничего не нашли, пробуем получить первый атрибут, похожий на uuid
                                 for attr in dir(uploaded):
                                     if attr.endswith('id') or attr == 'uuid':
                                         file_uuid = getattr(uploaded, attr)
@@ -384,7 +391,6 @@ def create_read_pdf_tool(bot):
                                 raise Exception("Не удалось получить идентификатор загруженного файла")
                             attachments.append(file_uuid)
 
-                        # Запрос на распознавание с повторными попытками
                         payload = {
                             "model": "GigaChat-Max",
                             "messages": [
@@ -397,6 +403,7 @@ def create_read_pdf_tool(bot):
                             ],
                             "temperature": 0.0,
                         }
+
                         for attempt in range(3):
                             try:
                                 response = await client.achat(payload)
@@ -411,7 +418,7 @@ def create_read_pdf_tool(bot):
                         recognized_text = response.choices[0].message.content.strip()
                         ocr_results.append(recognized_text)
 
-                        # Удаляем файлы из хранилища (опционально)
+                        # Удаление временных файлов из хранилища GigaChat
                         for att_id in attachments:
                             try:
                                 await client.adelete_file(att_id)
@@ -425,7 +432,6 @@ def create_read_pdf_tool(bot):
                             except OSError:
                                 pass
 
-            # Формируем итоговый текст
             final_parts = extracted_text_parts.copy()
             if ocr_results:
                 final_parts.append("--- Распознано с помощью OCR ---")
@@ -435,7 +441,6 @@ def create_read_pdf_tool(bot):
             if len(full_text) > 20000:
                 full_text = full_text[:20000] + "\n... (обрезка по длине)"
 
-            # Сохраняем в историю
             bot_me = await bot.me()
             await asyncio.to_thread(
                 save_bot_message,
@@ -462,8 +467,12 @@ def create_read_pdf_tool(bot):
 
     return read_pdf_file
 
+
 # ================== СОЗДАНИЕ АГЕНТА ==================
 def create_agent(bot):
+    """
+    Создаёт исполнителя агента с заданным набором инструментов и системным промптом.
+    """
     tools = [
         summator,
         get_chat_id,
@@ -493,8 +502,15 @@ def create_agent(bot):
     executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
     return executor
 
+
 # ================== СИНГЛТОН ==================
 class GigaChatSingleton:
+    """
+    Синглтон для управления общими ресурсами GigaChat:
+    - асинхронный клиент для работы с файлами и прямыми запросами
+    - исполнитель агента с историей
+    - LLM для анализа (без инструментов)
+    """
     _instance = None
     _executor = None
     _bot = None
@@ -503,28 +519,35 @@ class GigaChatSingleton:
     _async_client: Optional[GigaChatAsyncClient] = None
 
     async def get_async_client(self) -> GigaChatAsyncClient:
-        """Возвращает асинхронный клиент GigaChat для работы с файлами и прямыми запросами."""
+        """
+        Возвращает асинхронный клиент GigaChat для работы с файлами и прямыми запросами.
+        Клиент автоматически инициализируется при первом вызове.
+        """
         if self._async_client is None:
             self._async_client = GigaChatAsyncClient(
                 credentials=GIGACHAT_CREDENTIALS,
                 verify_ssl_certs=False,
             )
-            # Явно входим в контекстный менеджер
             await self._async_client.__aenter__()
         return self._async_client
 
     async def close(self):
-        """Закрытие клиента при остановке бота."""
+        """Закрывает асинхронный клиент GigaChat при остановке бота."""
         if self._async_client:
             await self._async_client.__aexit__(None, None, None)
             self._async_client = None
 
     async def get_executor(self):
+        """Возвращает исполнителя агента с поддержкой истории (создаёт при первом вызове)."""
         if self._executor_with_history is None:
             self._executor_with_history = create_agent_with_memory(self._bot)
         return self._executor_with_history
 
     async def ainvoke_with_history(self, chat_id: int, user_message: str):
+        """
+        Асинхронно вызывает агента с учётом истории сообщений для указанного chat_id.
+        Возвращает ответ агента.
+        """
         executor = await self.get_executor()
         config = {"configurable": {"session_id": str(chat_id)}}
         result = await executor.ainvoke({"input": user_message}, config=config)
@@ -536,7 +559,9 @@ class GigaChatSingleton:
         return cls._instance
 
     async def get_analysis_llm(self):
-        """Возвращает экземпляр GigaChat для анализа истории (без инструментов)."""
+        """
+        Возвращает экземпляр GigaChat для анализа истории (без инструментов).
+        """
         if self._analysis_llm is None:
             self._analysis_llm = GigaChat(
                 credentials=GIGACHAT_CREDENTIALS,
@@ -549,9 +574,8 @@ class GigaChatSingleton:
         return self._analysis_llm
 
     def set_bot(self, bot):
+        """Устанавливает экземпляр бота для использования в инструментах."""
         self._bot = bot
 
-    async def close(self):
-        pass
 
 gigachat_singleton = GigaChatSingleton()

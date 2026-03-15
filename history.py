@@ -1,3 +1,11 @@
+"""
+Модуль для работы с историей сообщений Telegram-чатов.
+
+Предоставляет функции для сохранения сообщений пользователей и бота,
+загрузки истории с фильтрацией, форматирования для вывода и экспорта в текстовый файл.
+Все данные хранятся в формате JSON с разбивкой по дням.
+"""
+
 import json
 import time
 from datetime import datetime, timedelta
@@ -6,9 +14,17 @@ from typing import List, Dict, Any, Optional
 
 from config import HISTORY_DIR, TXT_EXPORT_DIR
 
-# ---------- Безопасная работа с JSON ----------
+
 def safe_json_load(filepath: Path) -> List[Dict[str, Any]]:
-    """Безопасно загружает JSON, восстанавливая повреждённые файлы."""
+    """
+    Безопасно загружает JSON из файла, восстанавливая повреждённые данные при необходимости.
+
+    Args:
+        filepath: Путь к JSON-файлу.
+
+    Returns:
+        Список сообщений (пустой список, если файл отсутствует или повреждён).
+    """
     try:
         if not filepath.exists():
             return []
@@ -26,15 +42,25 @@ def safe_json_load(filepath: Path) -> List[Dict[str, Any]]:
                     return json.loads(content)
                 except:
                     pass
-            # Если не получилось, создаём бэкап
+            # Создание резервной копии повреждённого файла
             backup_path = filepath.with_suffix('.json.bak')
             filepath.rename(backup_path)
             return []
     except Exception:
         return []
 
+
 def safe_json_save(filepath: Path, data: List[Dict[str, Any]]) -> bool:
-    """Безопасно сохраняет JSON с временным файлом."""
+    """
+    Безопасно сохраняет данные в JSON, используя временный файл.
+
+    Args:
+        filepath: Целевой путь для сохранения.
+        data: Данные для записи.
+
+    Returns:
+        True в случае успеха, False при ошибке.
+    """
     temp_path = filepath.with_suffix('.tmp')
     try:
         temp_path.write_text(
@@ -50,9 +76,18 @@ def safe_json_save(filepath: Path, data: List[Dict[str, Any]]) -> bool:
             pass
         return False
 
-# ---------- Сохранение сообщений ----------
+
 def _get_history_file(chat_id: int, date: Optional[datetime] = None) -> Path:
-    """Возвращает путь к файлу истории для данного чата и даты."""
+    """
+    Возвращает путь к файлу истории для указанного чата и даты.
+
+    Args:
+        chat_id: Идентификатор чата.
+        date: Дата, для которой нужен файл (по умолчанию текущая).
+
+    Returns:
+        Path к JSON-файлу.
+    """
     if date is None:
         date = datetime.now()
     date_str = date.strftime("%Y-%m-%d")
@@ -60,8 +95,14 @@ def _get_history_file(chat_id: int, date: Optional[datetime] = None) -> Path:
     filename = f"chat_{chat_id}_{chat_type}_{date_str}.json"
     return HISTORY_DIR / filename
 
+
 def save_user_message(message) -> None:
-    """Сохраняет сообщение пользователя в JSON-историю (синхронно)."""
+    """
+    Сохраняет сообщение пользователя в историю.
+
+    Args:
+        message: Объект сообщения из aiogram.
+    """
     try:
         if not message.text:
             return
@@ -95,6 +136,7 @@ def save_user_message(message) -> None:
     except Exception as e:
         print(f"Ошибка сохранения сообщения пользователя: {e}")
 
+
 def save_bot_message(
     chat_id: int,
     text: str,
@@ -102,7 +144,16 @@ def save_bot_message(
     bot_id: int,
     bot_username: str
 ) -> None:
-    """Сохраняет сообщение бота в JSON-историю (синхронно)."""
+    """
+    Сохраняет сообщение бота в историю.
+
+    Args:
+        chat_id: Идентификатор чата.
+        text: Текст сообщения.
+        reply_to_message_id: ID сообщения, на которое отвечает бот (может быть None).
+        bot_id: ID бота.
+        bot_username: Username бота.
+    """
     try:
         date = datetime.now()
         filepath = _get_history_file(chat_id, date)
@@ -133,7 +184,7 @@ def save_bot_message(
     except Exception as e:
         print(f"Ошибка сохранения сообщения бота: {e}")
 
-# ---------- Чтение истории ----------
+
 def load_chat_history(
     chat_id: int,
     limit: int = 50,
@@ -141,8 +192,16 @@ def load_chat_history(
     search: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Загружает историю сообщений из файлов.
-    Возвращает список сообщений (каждое — словарь).
+    Загружает историю сообщений из файлов с возможностью фильтрации.
+
+    Args:
+        chat_id: Идентификатор чата.
+        limit: Максимальное количество сообщений (не более 200).
+        days: Если указано, загружаются сообщения не старше указанного числа дней.
+        search: Строка для поиска по тексту сообщений.
+
+    Returns:
+        Список сообщений (каждое — словарь), отсортированный по времени.
     """
     limit = min(limit, 200)
     search_lower = search.lower() if search else None
@@ -183,8 +242,17 @@ def load_chat_history(
 
     return recent_msgs
 
+
 def format_messages_for_display(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """Преобразует сообщения в удобный для вывода формат."""
+    """
+    Преобразует список сообщений в упрощённый формат для отображения.
+
+    Args:
+        messages: Список сообщений (словари из истории).
+
+    Returns:
+        Список словарей с ключами 'time', 'user', 'text'.
+    """
     result = []
     for msg in messages:
         user_info = msg.get('user', {})
@@ -198,10 +266,19 @@ def format_messages_for_display(messages: List[Dict[str, Any]]) -> List[Dict[str
         })
     return result
 
+
 def collect_recent_messages(chat_id: int, hours: int = 24) -> str:
     """
-    Собирает сообщения за последние N часов и возвращает их в виде текста.
-    Используется для анализа.
+    Собирает все сообщения за последние N часов и возвращает их в виде текста.
+
+    Используется для передачи в анализатор событий.
+
+    Args:
+        chat_id: Идентификатор чата.
+        hours: Количество часов от текущего момента.
+
+    Returns:
+        Многострочный текст с временными метками и текстами сообщений.
     """
     cutoff_time = datetime.now() - timedelta(hours=hours)
     cutoff_timestamp = cutoff_time.timestamp()
@@ -228,10 +305,20 @@ def collect_recent_messages(chat_id: int, hours: int = 24) -> str:
 
     return "\n".join(lines)
 
+
 def export_history_to_txt(chat_id: int, chat_title: str) -> Path:
     """
     Экспортирует всю историю чата в текстовый файл.
-    Возвращает путь к созданному файлу.
+
+    Args:
+        chat_id: Идентификатор чата.
+        chat_title: Название чата (используется в имени файла).
+
+    Returns:
+        Path к созданному текстовому файлу.
+
+    Raises:
+        ValueError: Если файлы истории отсутствуют.
     """
     json_files = sorted(HISTORY_DIR.glob(f"chat_{chat_id}_*_*.json"))
     if not json_files:
