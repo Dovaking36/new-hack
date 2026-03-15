@@ -17,7 +17,7 @@ from aiogram.types import ErrorEvent
 from langchain_core.messages import HumanMessage
 
 from config import TELEGRAM_BOT_TOKEN, HISTORY_DIR, ANALYSIS_INTERVAL
-from agent import gigachat_singleton, current_chat_id_var
+from agent import gigachat_singleton, current_chat_id_var, last_excel_file,last_pdf_file
 from history import (
     save_user_message,
     save_bot_message,
@@ -260,6 +260,41 @@ async def handle_voice(message: Message):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+
+@dp.message(F.document)
+async def handle_document(message: Message):
+    asyncio.create_task(safe_save_message(message))
+    document = message.document
+
+    logger.info(f"Получен документ: {document.file_name}, MIME: {document.mime_type}, размер: {document.file_size}")
+
+    # MIME-типы для Excel
+    excel_mime_types = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+        'application/vnd.ms-excel',                                           # .xls
+        'application/vnd.oasis.opendocument.spreadsheet',                    # .ods
+    ]
+    # MIME-типы для PDF
+    pdf_mime_types = [
+        'application/pdf',
+    ]
+
+    if document.mime_type in excel_mime_types:
+        last_excel_file[message.chat.id] = document.file_id
+        await message.reply(
+            "📊 Excel файл получен и сохранён. "
+            "Теперь вы можете задать вопрос о нём через /bot или упомянуть меня, "
+            "используя инструмент `read_excel_file`."
+        )
+    elif document.mime_type in pdf_mime_types:
+        last_pdf_file[message.chat.id] = document.file_id
+        await message.reply(
+            "📄 PDF файл получен и сохранён. "
+            "Теперь вы можете задать вопрос о нём через /bot или упомянуть меня, "
+            "используя инструмент `read_pdf_file`."
+        )
+    else:
+        await message.reply("Я пока умею работать только с Excel и PDF файлами. Пожалуйста, отправьте .xlsx, .xls или .pdf.")
 # ================== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ТЕКСТА ==================
 @dp.message()
 async def handle_all_text(message: Message):
@@ -290,6 +325,7 @@ async def handle_all_text(message: Message):
             except Exception as e:
                 logger.error(f"Ошибка ответа: {e}", exc_info=True)
                 await message.reply("❌ Произошла ошибка")
+
 
 # ================== ПРИВЕТСТВИЕ НОВЫХ УЧАСТНИКОВ ==================
 @dp.message(F.new_chat_members)

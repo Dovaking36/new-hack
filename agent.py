@@ -3,6 +3,9 @@ import contextvars
 import logging
 import tempfile
 import os
+import asyncio
+import fitz
+import PyPDF2
 import base64
 from typing import Optional
 
@@ -13,13 +16,15 @@ from langchain_gigachat import GigaChat
 from langchain_core.messages import HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from gigachat import GigaChatAsyncClient
+from gigachat import GigaChatAsyncClient, RateLimitError
 
 from config import GIGACHAT_CREDENTIALS
 from system_prompts import system_prompt_v2
 from history import save_bot_message
 
 # ================== НАСТРОЙКИ ==================
+last_excel_file = {}
+last_pdf_file = {}
 session_store = {}
 logger = logging.getLogger(__name__)
 
@@ -81,7 +86,7 @@ def create_read_history_tool():
     @tool
     async def read_chat_history(
         chat_id: Optional[int] = None,
-        limit: int = 50,
+        limit: int = 300,
         days: Optional[int] = None,
         search: str = "",
     ) -> str:
@@ -132,11 +137,11 @@ def create_transcribe_tool(bot):
             ) as client:
                 # 3. Загружаем аудио
                 with open(tmp_path, "rb") as f:
-                    uploaded = await client.upload_file(f, purpose="general")
+                    uploaded = await client.aupload_file(f, purpose="general")
                 audio_file_id = uploaded.id
 
                 # 4. Делаем запрос на транскрибацию
-                response = await client.chat(
+                response = await client.achat(
                     {
                         "model": "GigaChat-Max",
                         "messages": [
@@ -173,6 +178,290 @@ def create_transcribe_tool(bot):
                 os.unlink(tmp_path)
 
     return transcribe_audio
+
+def create_read_excel_tool(bot):
+    import pandas as pd
+    import tempfile
+    import os
+
+    @tool
+    async def read_excel_file(
+        file_id: Optional[str] = None,
+        sheet_name: Optional[str] = None,
+        chat_id: Optional[int] = None,
+    ) -> str:
+        """
+        Читает данные из Excel файла и возвращает их в текстовом виде.
+        Если file_id не указан, используется последний загруженный в этом чате файл.
+        """
+        if chat_id is None:
+            chat_id = current_chat_id_var.get()
+            if chat_id is None:
+                return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
+
+        # Определяем file_id
+        if file_id is None:
+            file_id = last_excel_file.get(chat_id)
+            if file_id is None:
+                return json.dumps({"error": "Нет доступного Excel файла для этого чата. Сначала отправьте файл."}, ensure_ascii=False)
+
+        tmp_path = None
+        try:
+            # Скачиваем файл из Telegram
+            file = await bot.get_file(file_id)
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                await bot.download_file(file.file_path, tmp.name)
+                tmp_path = tmp.name
+
+            # Читаем Excel
+            if sheet_name:
+                df = pd.read_excel(tmp_path, sheet_name=sheet_name)
+                sheets_data = {sheet_name: df}
+            else:
+                sheets_data = pd.read_excel(tmp_path, sheet_name=None)  # все листы
+
+            # Формируем текстовое представление
+            result_lines = []
+            for name, df in sheets_data.items():
+                result_lines.append(f"--- Лист: {name} ---")
+                if len(df) > 100:
+                    result_lines.append(f"Всего строк: {len(df)}. Показаны первые 100:")
+                    df_str = df.head(100).to_string()
+                else:
+                    df_str = df.to_string()
+                result_lines.append(df_str)
+                result_lines.append("")
+
+            full_text = "\n".join(result_lines)
+            # Ограничим длину (модель GigaChat имеет лимит контекста)
+            if len(full_text) > 15000:
+                full_text = full_text[:15000] + "\n... (обрезка по длине)"
+
+            # Сохраняем в историю (неблокирующий вызов)
+            bot_me = await bot.me()
+            await asyncio.to_thread(
+                save_bot_message,
+                chat_id=chat_id,
+                text=f"📊 Содержимое Excel файла (file_id {file_id}) прочитано.",
+                reply_to_message_id=None,
+                bot_id=bot_me.id,
+                bot_username=bot_me.username
+            )
+
+            return json.dumps({"success": True, "content": full_text}, ensure_ascii=False)
+
+        except Exception as e:
+            logger.error(f"Ошибка чтения Excel: {e}", exc_info=True)
+            return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    return read_excel_file
+
+def create_read_pdf_tool(bot):
+    @tool
+    async def read_pdf_file(
+        file_id: Optional[str] = None,
+        page_start: Optional[int] = None,
+        page_end: Optional[int] = None,
+        chat_id: Optional[int] = None,
+    ) -> str:
+        """
+        Читает текст из PDF файла. Если текст не извлекается (сканированные страницы),
+        использует GigaChat Vision для распознавания текста с изображений.
+        """
+        if chat_id is None:
+            chat_id = current_chat_id_var.get()
+            if chat_id is None:
+                return json.dumps({"error": "Не удалось определить chat_id"}, ensure_ascii=False)
+
+        # Определяем корректный file_id
+        target_file_id = file_id
+        if target_file_id:
+            try:
+                await bot.get_file(target_file_id)
+                logger.info(f"Используем переданный file_id: {target_file_id}")
+            except Exception as e:
+                logger.warning(f"Переданный file_id {target_file_id} невалиден: {e}. Пробуем последний сохранённый.")
+                target_file_id = last_pdf_file.get(chat_id)
+        else:
+            target_file_id = last_pdf_file.get(chat_id)
+
+        if not target_file_id:
+            return json.dumps({"error": "Нет доступного PDF файла для этого чата. Сначала отправьте файл."}, ensure_ascii=False)
+
+        tmp_pdf_path = None
+        try:
+            # Скачиваем PDF из Telegram
+            file = await bot.get_file(target_file_id)
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                await bot.download_file(file.file_path, tmp.name)
+                tmp_pdf_path = tmp.name
+
+            # Получаем асинхронный клиент GigaChat
+            client = await gigachat_singleton.get_async_client()
+
+            # Синхронная обработка PDF в потоке
+            def process_pdf_sync(pdf_path, start_page, end_page):
+                doc = fitz.open(pdf_path)
+                total_pages = len(doc)
+                start = max(1, start_page if start_page else 1)
+                end = min(total_pages, end_page if end_page else total_pages)
+                if start > end or start > total_pages:
+                    raise ValueError(f"Неверный диапазон страниц. Всего страниц: {total_pages}")
+
+                extracted_text_parts = []
+                pages_for_ocr = []  # (page_num, image_path)
+
+                for page_num in range(start, end + 1):
+                    page = doc[page_num - 1]
+                    text = page.get_text().strip()
+                    if text:
+                        extracted_text_parts.append(f"--- Страница {page_num} ---\n{text}")
+                    else:
+                        # Страница без текста – готовим для OCR
+                        pix = page.get_pixmap(dpi=150)
+                        img_fd, img_path = tempfile.mkstemp(suffix=".png")
+                        os.close(img_fd)
+                        pix.save(img_path)
+                        pages_for_ocr.append((page_num, img_path))
+
+                doc.close()
+                return extracted_text_parts, pages_for_ocr, total_pages
+
+            extracted_text_parts, pages_for_ocr, total_pages = await asyncio.to_thread(
+                process_pdf_sync, tmp_pdf_path, page_start, page_end
+            )
+
+            # OCR через GigaChat Vision
+            ocr_results = []
+            if pages_for_ocr:
+                chunk_size = 10
+                for i in range(0, len(pages_for_ocr), chunk_size):
+                    chunk = pages_for_ocr[i:i+chunk_size]
+                    attachments = []
+                    temp_img_files = []
+
+                    try:
+                        for page_num, img_path in chunk:
+                            temp_img_files.append(img_path)
+
+                            # Загружаем изображение с повторными попытками при 429
+                            for attempt in range(3):
+                                try:
+                                    with open(img_path, "rb") as f:
+                                        uploaded = await client.aupload_file(f, purpose="general")
+                                    break
+                                except RateLimitError:
+                                    if attempt == 2:
+                                        raise
+                                    wait = 2 ** attempt
+                                    logger.warning(f"Rate limit при загрузке, повтор через {wait}с")
+                                    await asyncio.sleep(wait)
+
+                            # Отладочный вывод для определения структуры uploaded
+                            logger.debug(f"Тип uploaded: {type(uploaded)}")
+                            logger.debug(f"Атрибуты: {dir(uploaded)}")
+                            logger.debug(f"Содержимое: {uploaded}")
+
+                            # Извлекаем UUID (поле может называться id или file_id)
+                            file_uuid = None
+                            if hasattr(uploaded, 'id_'):
+                                file_uuid = uploaded.id_
+                            elif hasattr(uploaded, 'file_id'):
+                                file_uuid = uploaded.id_
+                            elif isinstance(uploaded, dict):
+                                file_uuid = uploaded.get('id') or uploaded.get('file_id')
+                            else:
+                                # Если ничего не нашли, пробуем получить первый атрибут, похожий на uuid
+                                for attr in dir(uploaded):
+                                    if attr.endswith('id') or attr == 'uuid':
+                                        file_uuid = getattr(uploaded, attr)
+                                        break
+
+                            if not file_uuid:
+                                raise Exception("Не удалось получить идентификатор загруженного файла")
+                            attachments.append(file_uuid)
+
+                        # Запрос на распознавание с повторными попытками
+                        payload = {
+                            "model": "GigaChat-Max",
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": "Распознай весь текст на этих изображениях и верни его. "
+                                               "Для каждого изображения укажи номер страницы.",
+                                    "attachments": attachments,
+                                }
+                            ],
+                            "temperature": 0.0,
+                        }
+                        for attempt in range(3):
+                            try:
+                                response = await client.achat(payload)
+                                break
+                            except RateLimitError:
+                                if attempt == 2:
+                                    raise
+                                wait = 2 ** attempt
+                                logger.warning(f"Rate limit при запросе, повтор через {wait}с")
+                                await asyncio.sleep(wait)
+
+                        recognized_text = response.choices[0].message.content.strip()
+                        ocr_results.append(recognized_text)
+
+                        # Удаляем файлы из хранилища (опционально)
+                        for att_id in attachments:
+                            try:
+                                await client.adelete_file(att_id)
+                            except Exception as e:
+                                logger.warning(f"Не удалось удалить файл {att_id}: {e}")
+
+                    finally:
+                        for img_path in temp_img_files:
+                            try:
+                                os.unlink(img_path)
+                            except OSError:
+                                pass
+
+            # Формируем итоговый текст
+            final_parts = extracted_text_parts.copy()
+            if ocr_results:
+                final_parts.append("--- Распознано с помощью OCR ---")
+                final_parts.extend(ocr_results)
+
+            full_text = "\n\n".join(final_parts) if final_parts else "Не удалось извлечь текст из PDF."
+            if len(full_text) > 20000:
+                full_text = full_text[:20000] + "\n... (обрезка по длине)"
+
+            # Сохраняем в историю
+            bot_me = await bot.me()
+            await asyncio.to_thread(
+                save_bot_message,
+                chat_id=chat_id,
+                text=f"📄 Содержимое PDF файла (file_id {target_file_id}) прочитано.",
+                reply_to_message_id=None,
+                bot_id=bot_me.id,
+                bot_username=bot_me.username
+            )
+
+            return json.dumps({
+                "success": True,
+                "content": full_text,
+                "total_pages": total_pages,
+                "pages_processed": len(extracted_text_parts) + len(pages_for_ocr)
+            }, ensure_ascii=False)
+
+        except Exception as e:
+            logger.error(f"Ошибка чтения PDF: {e}", exc_info=True)
+            return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        finally:
+            if tmp_pdf_path and os.path.exists(tmp_pdf_path):
+                os.unlink(tmp_pdf_path)
+
+    return read_pdf_file
+
 # ================== СОЗДАНИЕ АГЕНТА ==================
 def create_agent(bot):
     tools = [
@@ -181,6 +470,8 @@ def create_agent(bot):
         create_notification_tool(bot),
         create_read_history_tool(),
         create_transcribe_tool(bot),
+        create_read_excel_tool(bot),
+        create_read_pdf_tool(bot),
     ]
 
     prompt = ChatPromptTemplate.from_messages([
